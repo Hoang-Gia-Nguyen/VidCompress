@@ -131,11 +131,9 @@ def main(folder_path, keep_original):
                     if not keep_original:
                         os.remove(input_path)
                     os.rename(temp_output_path, input_path)
-                    print(f'
-Successfully re-encoded {input_path}')
+                    print(f'Successfully re-encoded {input_path}')
                 else:
-                    print(f'
-Failed to re-encode {input_path}')
+                    print(f'Failed to re-encode {input_path}')
                     if os.path.exists(temp_output_path):
                         os.remove(temp_output_path)
             else:
@@ -147,13 +145,11 @@ Failed to re-encode {input_path}')
 
                 print(f'Transcoding {input_path} to {output_path}...')
                 if transcode_file(input_path, output_path, use_videotoolbox):
-                    print(f'
-Successfully transcoded {input_path}')
+                    print(f'Successfully transcoded {input_path}')
                     if not keep_original:
                         os.remove(input_path)
                 else:
-                    print(f'
-Failed to transcode {input_path}')
+                    print(f'Failed to transcode {input_path}')
 
 
 if __name__ == '__main__':
