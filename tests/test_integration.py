@@ -16,12 +16,16 @@ def sample_video(temp_dir):
     # Create a valid test video file using FFmpeg
     video_path = os.path.join(temp_dir, 'test.mp4')
     import subprocess
-    # Create a 1-second test video
+    # Create a 1-second test video with audio
     subprocess.run([
         'ffmpeg', '-y',
         '-f', 'lavfi',
         '-i', 'testsrc=duration=1:size=320x240:rate=30',
+        '-f', 'lavfi',
+        '-i', 'sine=frequency=440:duration=1',
         '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-ac', '2',  # 2 audio channels
         video_path
     ], check=True, capture_output=True)
     return video_path
