@@ -13,18 +13,46 @@ def temp_dir():
     yield temp_dir
     shutil.rmtree(temp_dir)
 
+def safe_remove(path):
+    """Safely remove a file if it exists"""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+def safe_rename(src, dst):
+    """Safely rename a file, removing destination if it exists"""
+    try:
+        if os.path.exists(dst):
+            os.remove(dst)
+        os.rename(src, dst)
+    except Exception as e:
+        print(f"Error during rename: {e}")
+        # If rename fails, try copy and delete
+        try:
+            shutil.copy2(src, dst)
+            os.remove(src)
+        except Exception as e:
+            print(f"Error during copy fallback: {e}")
+            raise
+
 def clean_temp_files(path):
     """Clean up any temporary files from failed tests"""
+    # Clean both temp and final files to ensure clean state
     temp_path = os.path.splitext(path)[0] + '.temp.mkv'
-    if os.path.exists(temp_path):
-        os.remove(temp_path)
+    mkv_path = os.path.splitext(path)[0] + '.mkv'
+    safe_remove(temp_path)
+    safe_remove(mkv_path)
 
 def create_test_video(temp_dir, filename, video_codec, audio_codec, container):
     """Helper function to create test videos with different codecs"""
     import subprocess
     video_path = os.path.join(temp_dir, f'test_{filename}.{container}')
-    # Clean any existing temporary files first
+    # Clean any existing files first
     clean_temp_files(video_path)
+    safe_remove(video_path)
+    
     subprocess.run([
         'ffmpeg', '-y',
         '-f', 'lavfi',
@@ -49,6 +77,9 @@ def sample_videos(temp_dir):
     }
     
     # Add a second audio track to the multi_audio test
+    temp_multi_audio = os.path.join(temp_dir, 'temp_multi.mkv')
+    safe_remove(temp_multi_audio)  # Ensure temp file doesn't exist
+    
     subprocess.run([
         'ffmpeg', '-y',
         '-i', videos['multi_audio'],
@@ -60,11 +91,10 @@ def sample_videos(temp_dir):
         '-map', '0:v:0',
         '-map', '0:a:0',
         '-map', '1:a:0',
-        os.path.join(temp_dir, 'temp.mkv')
+        temp_multi_audio
     ], check=True, capture_output=True)
     
-    import shutil
-    shutil.move(os.path.join(temp_dir, 'temp.mkv'), videos['multi_audio'])
+    safe_rename(temp_multi_audio, videos['multi_audio'])
     
     return videos
 
@@ -137,11 +167,11 @@ def test_multi_audio_tracks(temp_dir, sample_videos):
 def test_main_nested_folders(temp_dir, sample_videos):
     # Create nested directory structure
     nested_dir = os.path.join(temp_dir, 'nested', 'folders')
-    os.makedirs(nested_dir)
+    os.makedirs(nested_dir, exist_ok=True)
     
     # Copy a test video to nested folder
-    import shutil
     nested_video = os.path.join(nested_dir, 'test.mp4')
+    safe_remove(nested_video)  # Ensure target doesn't exist
     shutil.copy2(sample_videos['h264_aac'], nested_video)
     
     # Clean any leftover temp files
