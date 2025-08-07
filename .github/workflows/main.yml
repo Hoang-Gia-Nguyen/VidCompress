@@ -47,7 +47,13 @@ jobs:
       run: |
         pytest tests/test_integration.py -v
 
-    - name: Upload coverage report
+    - name: Generate Junit XML report
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        pytest --cov --junitxml=junit.xml -o junit_family=legacy
+
+    - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v3
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -55,6 +61,12 @@ jobs:
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: true
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
 
   build-windows:
     runs-on: windows-latest
@@ -94,7 +106,13 @@ jobs:
       run: |
         pytest tests/test_integration.py -v
 
-    - name: Upload coverage report
+    - name: Generate Junit XML report
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        pytest --cov --junitxml=junit.xml -o junit_family=legacy
+
+    - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v3
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -102,3 +120,9 @@ jobs:
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: true
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
