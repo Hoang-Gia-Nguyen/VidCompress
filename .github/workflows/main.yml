@@ -49,7 +49,7 @@ jobs:
 
     - name: Generate Junit XML report
       run: |
-        pytest --cov --junitxml=junit.xml -o junit_family=legacy
+        PYTHONPATH: ${{ github.workspace }} pytest --cov --junitxml=junit.xml -o junit_family=legacy
 
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v3
@@ -106,7 +106,7 @@ jobs:
 
     - name: Generate Junit XML report
       run: |
-        pytest --cov --junitxml=junit.xml -o junit_family=legacy
+        PYTHONPATH: ${{ github.workspace }} pytest --cov --junitxml=junit.xml -o junit_family=legacy
 
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v3
