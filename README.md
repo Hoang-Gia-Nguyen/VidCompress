@@ -23,7 +23,7 @@ Before running the script, ensure you have the following installed and accessibl
 
 1.  **Navigate to the script directory**:
     ```bash
-    cd /Volumes/KINGSTON/Workspace/transcode-app
+    cd ./VidCompress
     ```
 
 2.  **Run the script**:
