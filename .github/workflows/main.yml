@@ -48,8 +48,10 @@ jobs:
         pytest tests/test_integration.py -v
 
     - name: Generate Junit XML report
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
-        PYTHONPATH: ${{ github.workspace }} pytest --cov --junitxml=junit.xml -o junit_family=legacy
+        pytest --cov --junitxml=junit.xml -o junit_family=legacy
 
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v3
@@ -105,8 +107,10 @@ jobs:
         pytest tests/test_integration.py -v
 
     - name: Generate Junit XML report
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
-        PYTHONPATH: ${{ github.workspace }} pytest --cov --junitxml=junit.xml -o junit_family=legacy
+        pytest --cov --junitxml=junit.xml -o junit_family=legacy
 
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v3
