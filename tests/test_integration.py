@@ -13,10 +13,18 @@ def temp_dir():
     yield temp_dir
     shutil.rmtree(temp_dir)
 
+def clean_temp_files(path):
+    """Clean up any temporary files from failed tests"""
+    temp_path = os.path.splitext(path)[0] + '.temp.mkv'
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+
 def create_test_video(temp_dir, filename, video_codec, audio_codec, container):
     """Helper function to create test videos with different codecs"""
     import subprocess
     video_path = os.path.join(temp_dir, f'test_{filename}.{container}')
+    # Clean any existing temporary files first
+    clean_temp_files(video_path)
     subprocess.run([
         'ffmpeg', '-y',
         '-f', 'lavfi',
@@ -75,6 +83,7 @@ def test_main_with_non_video_file(temp_dir):
 
 def test_transcode_h264(temp_dir, sample_videos):
     video_path = sample_videos['h264_aac']
+    clean_temp_files(video_path)  # Clean any leftover temp files
     main(temp_dir, True)
     # Check that original file exists (keep_original=True)
     assert os.path.exists(video_path)
@@ -84,6 +93,7 @@ def test_transcode_h264(temp_dir, sample_videos):
 
 def test_transcode_webm(temp_dir, sample_videos):
     video_path = sample_videos['vp8_vorbis']
+    clean_temp_files(video_path)  # Clean any leftover temp files
     main(temp_dir, False)
     # Original file should be deleted (keep_original=False)
     assert not os.path.exists(video_path)
@@ -93,6 +103,7 @@ def test_transcode_webm(temp_dir, sample_videos):
 
 def test_transcode_avi(temp_dir, sample_videos):
     video_path = sample_videos['mpeg4_mp3']
+    clean_temp_files(video_path)  # Clean any leftover temp files
     main(temp_dir, False)
     # Check conversion from AVI (MPEG4+MP3) to MKV (HEVC+AAC)
     assert not os.path.exists(video_path)  # Original deleted
@@ -101,6 +112,7 @@ def test_transcode_avi(temp_dir, sample_videos):
 
 def test_multi_audio_tracks(temp_dir, sample_videos):
     video_path = sample_videos['multi_audio']
+    clean_temp_files(video_path)  # Clean any leftover temp files
     main(temp_dir, True)
     # Test handling of multiple audio tracks
     output_path = video_path  # Since input is already .mkv
@@ -131,6 +143,9 @@ def test_main_nested_folders(temp_dir, sample_videos):
     import shutil
     nested_video = os.path.join(nested_dir, 'test.mp4')
     shutil.copy2(sample_videos['h264_aac'], nested_video)
+    
+    # Clean any leftover temp files
+    clean_temp_files(nested_video)
     
     main(temp_dir, True)
     assert os.path.exists(nested_video)
