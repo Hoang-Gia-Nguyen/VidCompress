@@ -186,4 +186,9 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
+    # Validate the input path
+    if not os.path.exists(args.folder_path):
+        print(f"Error: No such file or directory: '{args.folder_path}'", file=sys.stderr)
+        sys.exit(1)
+    
     main(args.folder_path, args.keep_original)
