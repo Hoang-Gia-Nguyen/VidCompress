@@ -3,7 +3,16 @@ import os
 import subprocess
 import json
 import argparse
+import tempfile
+import shutil
 from unittest.mock import patch, MagicMock, mock_open
+
+@pytest.fixture
+def cli_temp_dir():
+    """Creates a temporary directory for CLI tests"""
+    temp_dir = tempfile.mkdtemp()
+    yield temp_dir
+    shutil.rmtree(temp_dir)
 from vidcompress import (
     get_ffmpeg_path,
     get_ffprobe_path,
@@ -126,10 +135,16 @@ def test_main_process_mkv_file(mock_transcode, mock_media_info, mock_copy2,
     # Run main function
     main('/path', keep_original=False)
 
-    # Verify the expected workflow
+    # Verify the expected workflow:
+    # - transcode should be called once
+    # - makedirs should be called to ensure target directory exists
+    # - remove should be called to clean up temp files and input file
     mock_transcode.assert_called_once()
-    mock_copy2.assert_called_once()
     mock_makedirs.assert_called_once()
+    assert mock_remove.call_count >= 1, "Should call remove at least once"
+    # At minimum, should try to remove the input file
+    assert any(call[0][0].endswith('video.mkv') for call in mock_remove.call_args_list), \
+        "Should try to remove input file"
 
 @patch('os.walk')
 @patch('vidcompress.get_media_info')
@@ -223,25 +238,67 @@ def test_main_error_handling(mock_remove, mock_makedirs, mock_exists,
     # Should handle directory creation error gracefully
     main('/path', keep_original=False)
 
-@patch('sys.argv', ['vidcompress.py', '/test/path'])
-def test_main_cli_execution():
-    import vidcompress
-    if hasattr(vidcompress, '__main__'):
-        # This will execute the main block
-        pass
+def test_cli_help():
+    """Test that the CLI help command works and shows usage information"""
+    result = subprocess.run(['python', 'vidcompress.py', '--help'], 
+                          capture_output=True, text=True)
+    assert result.returncode == 0
+    assert 'usage:' in result.stdout.lower()
+    assert 'folder_path' in result.stdout
+    assert '--keep-original' in result.stdout
 
-@patch('argparse.ArgumentParser.parse_args')
-@patch('vidcompress.main')
-def test_main_cli(mock_main, mock_args):
-    mock_args.return_value = MagicMock(
-        folder_path='/test/path',
-        keep_original=True
+def test_cli_invalid_path():
+    """Test CLI behavior with an invalid path"""
+    result = subprocess.run(['python', 'vidcompress.py', '/nonexistent/path'], 
+                          capture_output=True, text=True)
+    assert 'No such file or directory' in result.stderr
+    # Script should exit with non-zero status for invalid paths
+    assert result.returncode == 1
+
+def test_cli_with_keep_original(cli_temp_dir):
+    """Test CLI with --keep-original flag"""
+    # Create a test video file with h264 content to ensure it needs transcoding
+    test_file = os.path.join(cli_temp_dir, "test.mkv")
+    subprocess.run([
+        'ffmpeg', '-y',
+        '-f', 'lavfi', '-i', 'testsrc=duration=1:size=320x240:rate=30',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+        '-c:v', 'libx264', '-c:a', 'aac',
+        test_file
+    ], check=True, capture_output=True)
+    
+    result = subprocess.run(
+        ['python', 'vidcompress.py', cli_temp_dir, '--keep-original'],
+        capture_output=True, text=True
     )
-    # Mock sys.argv to avoid actual CLI parsing
-    with patch('sys.argv', ['vidcompress.py', '/test/path', '--keep-original']):
-        import vidcompress
-        if hasattr(vidcompress, '__main__'):
-            mock_main.assert_called_once_with('/test/path', True)
+    assert result.returncode == 0, f"CLI failed with output: {result.stderr}"
+    assert os.path.exists(test_file), "Original file should still exist"
+    re_encoded = os.path.join(cli_temp_dir, "test_re-encoded.mkv")
+    assert os.path.exists(re_encoded), "Re-encoded file should exist"
+
+def test_cli_without_keep_original(cli_temp_dir):
+    """Test CLI without --keep-original flag"""
+    # Create a test video file with h264 content
+    test_file = os.path.join(cli_temp_dir, "test.mkv")
+    subprocess.run([
+        'ffmpeg', '-y',
+        '-f', 'lavfi', '-i', 'testsrc=duration=1:size=320x240:rate=30',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+        '-c:v', 'libx264', '-c:a', 'aac',
+        test_file
+    ], check=True, capture_output=True)
+    
+    # Store original modification time
+    orig_mtime = os.path.getmtime(test_file)
+    
+    result = subprocess.run(
+        ['python', 'vidcompress.py', cli_temp_dir],
+        capture_output=True, text=True
+    )
+    assert result.returncode == 0, f"CLI failed with output: {result.stderr}"
+    assert os.path.exists(test_file), "Re-encoded file should exist at original path"
+    # Verify it's a different file by checking modification time
+    assert os.path.getmtime(test_file) > orig_mtime, "File should have been replaced with re-encoded version"
 
 @patch('os.path.exists')
 @patch('os.remove')

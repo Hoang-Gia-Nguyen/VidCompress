@@ -160,3 +160,38 @@ def test_main_nested_folders(temp_dir, sample_videos):
     
     main(test_dir, True)
     assert os.path.exists(nested_video)
+
+def test_keep_original_mkv(temp_dir, sample_videos):
+    """Test --keep-original option with MKV file that needs re-encoding"""
+    # Create a test MKV file
+    test_video = create_test_video(temp_dir, 'mkv_keep_test', 'libx264', 'aac', 'mkv')
+    
+    # Test with keep_original=True first
+    test_dir1 = os.path.join(temp_dir, 'test_keep')
+    os.makedirs(test_dir1)
+    test_video1 = os.path.join(test_dir1, os.path.basename(test_video))
+    shutil.copy2(test_video, test_video1)
+    
+    main(test_dir1, True)
+    base_name1 = os.path.splitext(test_video1)[0]
+    re_encoded_path = f"{base_name1}_re-encoded.mkv"
+    
+    # Check that both original and re-encoded files exist
+    assert os.path.exists(test_video1), "Original file should be kept"
+    assert os.path.exists(re_encoded_path), "Re-encoded file should exist"
+    
+    # Test with keep_original=False
+    test_dir2 = os.path.join(temp_dir, 'test_remove')
+    os.makedirs(test_dir2)
+    test_video2 = os.path.join(test_dir2, os.path.basename(test_video))
+    shutil.copy2(test_video, test_video2)
+    
+    # Store file modification time of original
+    orig_mtime = os.path.getmtime(test_video2)
+    
+    main(test_dir2, False)
+    
+    # Check that a file exists at the original path
+    assert os.path.exists(test_video2), "Re-encoded file should exist at original path"
+    # Verify it's a different file (modification time changed)
+    assert os.path.getmtime(test_video2) > orig_mtime, "File should have been replaced with re-encoded version"

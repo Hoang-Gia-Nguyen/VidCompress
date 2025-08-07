@@ -135,16 +135,26 @@ def main(folder_path, keep_original):
                 
                 if transcode_file(input_path, temp_output_path, use_videotoolbox):
                     try:
-                        if not keep_original and os.path.exists(input_path):
-                            os.remove(input_path)
-                        # Ensure target directory exists
+                        # Determine the final output path based on keep_original flag
                         target_dir = os.path.dirname(input_path)
+                        base_name = os.path.splitext(os.path.basename(input_path))[0]
+                        
+                        if keep_original:
+                            # Create a new filename with _re-encoded suffix
+                            final_path = os.path.join(target_dir, f"{base_name}_re-encoded.mkv")
+                        else:
+                            final_path = input_path
+                        
+                        # Ensure target directory exists
                         os.makedirs(target_dir, exist_ok=True)
-                        # Copy temp file to target
-                        shutil.copy2(temp_output_path, input_path)
-                        # Clean up temp file
-                        os.remove(temp_output_path)
-                        print(f'Successfully re-encoded {input_path}')
+                        
+                        if not keep_original and os.path.exists(input_path):
+                            # For non-keep-original case, remove input after successful re-encoding
+                            os.remove(input_path)
+                            
+                        # Move temp file to final destination
+                        shutil.move(temp_output_path, final_path)
+                        print(f'Successfully re-encoded to {final_path}')
                     except Exception as e:
                         print(f'Error during file operation: {e}')
                         if os.path.exists(temp_output_path):
@@ -175,5 +185,10 @@ if __name__ == '__main__':
     parser.add_argument('--keep-original', action='store_true', help='Do not delete the original file after successful transcoding.')
     
     args = parser.parse_args()
+    
+    # Validate the input path
+    if not os.path.exists(args.folder_path):
+        print(f"Error: No such file or directory: '{args.folder_path}'", file=sys.stderr)
+        sys.exit(1)
     
     main(args.folder_path, args.keep_original)
