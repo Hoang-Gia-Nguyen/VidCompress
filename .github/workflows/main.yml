@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - development
+      - workflow-development
 
 jobs:
   build-ubuntu:
@@ -23,6 +24,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install -r requirements-test.txt
 
     - name: Install ffmpeg on Ubuntu
       run: |
@@ -32,6 +34,27 @@ jobs:
     - name: Check script syntax
       run: |
         python -m py_compile vidcompress.py
+
+    - name: Run unit tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        pytest tests/test_unit.py -v --cov=vidcompress --cov-report=xml
+
+    - name: Run integration tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        pytest tests/test_integration.py -v
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v3
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: true
 
   build-windows:
     runs-on: windows-latest
@@ -49,6 +72,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install -r requirements-test.txt
 
     - name: Install ffmpeg on Windows
       run: |
@@ -57,3 +81,24 @@ jobs:
     - name: Check script syntax
       run: |
         python -m py_compile vidcompress.py
+
+    - name: Run unit tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        pytest tests/test_unit.py -v --cov=vidcompress --cov-report=xml
+
+    - name: Run integration tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
+      run: |
+        pytest tests/test_integration.py -v
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v3
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: true
