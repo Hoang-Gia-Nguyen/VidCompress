@@ -135,10 +135,14 @@ def main(folder_path, keep_original):
                 
                 if transcode_file(input_path, temp_output_path, use_videotoolbox):
                     try:
-                        if not keep_original:
-                            if os.path.exists(input_path):
-                                os.remove(input_path)
+                        if not keep_original and os.path.exists(input_path):
+                            os.remove(input_path)
+                        # Ensure target directory exists
+                        target_dir = os.path.dirname(input_path)
+                        os.makedirs(target_dir, exist_ok=True)
+                        # Copy temp file to target
                         shutil.copy2(temp_output_path, input_path)
+                        # Clean up temp file
                         os.remove(temp_output_path)
                         print(f'Successfully re-encoded {input_path}')
                     except Exception as e:

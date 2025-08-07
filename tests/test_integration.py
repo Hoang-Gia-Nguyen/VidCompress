@@ -140,8 +140,8 @@ def test_main_with_non_video_file(temp_dir):
 
 def setup_test_video(temp_dir, video_path):
     """Set up a clean test directory with a single video"""
-    # Create a unique test directory for each test run
-    test_dir = os.path.join(temp_dir, f'test_video_{os.path.basename(video_path)}')
+    # Create a clean test directory
+    test_dir = os.path.join(temp_dir, 'test_video')
     if os.path.exists(test_dir):
         shutil.rmtree(test_dir)
     os.makedirs(test_dir)
