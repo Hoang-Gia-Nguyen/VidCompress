@@ -13,10 +13,17 @@ def temp_dir():
 
 @pytest.fixture
 def sample_video(temp_dir):
-    # Create a dummy video file
+    # Create a valid test video file using FFmpeg
     video_path = os.path.join(temp_dir, 'test.mp4')
-    with open(video_path, 'wb') as f:
-        f.write(b'dummy video content')
+    import subprocess
+    # Create a 1-second test video
+    subprocess.run([
+        'ffmpeg', '-y',
+        '-f', 'lavfi',
+        '-i', 'testsrc=duration=1:size=320x240:rate=30',
+        '-c:v', 'libx264',
+        video_path
+    ], check=True, capture_output=True)
     return video_path
 
 def test_main_empty_folder(temp_dir):
