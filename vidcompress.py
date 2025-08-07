@@ -5,6 +5,7 @@ import sys
 import time
 import json
 import argparse
+import shutil
 
 # This comment is to trigger the GitHub Actions workflow on the development branch.
 
@@ -133,13 +134,17 @@ def main(folder_path, keep_original):
                     os.remove(temp_output_path)
                 
                 if transcode_file(input_path, temp_output_path, use_videotoolbox):
-                    if not keep_original:
-                        os.remove(input_path)
-                    # On Windows, ensure target doesn't exist before rename
-                    if os.path.exists(input_path):
-                        os.remove(input_path)
-                    os.rename(temp_output_path, input_path)
-                    print(f'Successfully re-encoded {input_path}')
+                    try:
+                        if not keep_original:
+                            if os.path.exists(input_path):
+                                os.remove(input_path)
+                        shutil.copy2(temp_output_path, input_path)
+                        os.remove(temp_output_path)
+                        print(f'Successfully re-encoded {input_path}')
+                    except Exception as e:
+                        print(f'Error during file operation: {e}')
+                        if os.path.exists(temp_output_path):
+                            os.remove(temp_output_path)
                 else:
                     print(f'Failed to re-encode {input_path}')
                     if os.path.exists(temp_output_path):
