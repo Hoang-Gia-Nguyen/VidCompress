@@ -36,10 +36,14 @@ jobs:
         python -m py_compile vidcompress.py
 
     - name: Run unit tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         pytest tests/test_unit.py -v --cov=vidcompress --cov-report=xml
 
     - name: Run integration tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         pytest tests/test_integration.py -v
 
@@ -78,10 +82,14 @@ jobs:
         python -m py_compile vidcompress.py
 
     - name: Run unit tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         pytest tests/test_unit.py -v --cov=vidcompress --cov-report=xml
 
     - name: Run integration tests
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         pytest tests/test_integration.py -v
 
