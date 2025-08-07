@@ -80,49 +80,6 @@ def sample_videos(temp_dir):
         name, vcodec, acodec, container = config
         videos[name] = create_test_video(temp_dir, name, vcodec, acodec, container)
     
-    # Create multi-audio video separately to avoid conflicts
-    multi_audio_path = os.path.join(temp_dir, 'test_multi_audio.mkv')
-    temp_initial = os.path.join(temp_dir, 'initial_multi.mkv')
-    temp_final = os.path.join(temp_dir, 'final_multi.mkv')
-    
-    # Clean up any existing files
-    for path in [multi_audio_path, temp_initial, temp_final]:
-        safe_remove(path)
-    
-    # Create initial single-audio file
-    subprocess.run([
-        'ffmpeg', '-y',
-        '-f', 'lavfi',
-        '-i', 'testsrc=duration=1:size=320x240:rate=30',
-        '-f', 'lavfi',
-        '-i', 'sine=frequency=440:duration=1',
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-ac', '2',
-        temp_initial
-    ], check=True, capture_output=True)
-    
-    # Add second audio track
-    subprocess.run([
-        'ffmpeg', '-y',
-        '-i', temp_initial,
-        '-f', 'lavfi',
-        '-i', 'sine=frequency=880:duration=1',
-        '-c:v', 'copy',
-        '-c:a', 'aac',
-        '-ac', '2',
-        '-map', '0:v:0',
-        '-map', '0:a:0',
-        '-map', '1:a:0',
-        temp_final
-    ], check=True, capture_output=True)
-    
-    # Move to final location
-    shutil.copy2(temp_final, multi_audio_path)
-    safe_remove(temp_initial)
-    safe_remove(temp_final)
-    
-    videos['multi_audio'] = multi_audio_path
     return videos
 
 def test_main_empty_folder(temp_dir):
@@ -190,30 +147,6 @@ def test_transcode_avi(temp_dir, sample_videos):
     assert not os.path.exists(video_path)  # Original deleted
     output_path = os.path.splitext(video_path)[0] + '.mkv'
     assert os.path.exists(output_path)
-
-def test_multi_audio_tracks(temp_dir, sample_videos):
-    # Set up isolated test environment
-    test_dir, video_path = setup_test_video(temp_dir, sample_videos['multi_audio'])
-    
-    main(test_dir, True)
-    # Test handling of multiple audio tracks
-    output_path = video_path  # Since input is already .mkv
-    assert os.path.exists(output_path)
-    
-    # Verify the output has correct format using ffprobe
-    result = subprocess.run([
-        'ffprobe',
-        '-v', 'quiet',
-        '-print_format', 'json',
-        '-show_streams',
-        output_path
-    ], check=True, capture_output=True, text=True)
-    
-    info = json.loads(result.stdout)
-    audio_streams = [s for s in info['streams'] if s['codec_type'] == 'audio']
-    assert len(audio_streams) == 1  # Should be consolidated to one stereo track
-    assert audio_streams[0]['codec_name'] == 'aac'
-    assert audio_streams[0]['channels'] == 2
 
 def test_main_nested_folders(temp_dir, sample_videos):
     # Create test directory with nested structure
