@@ -53,7 +53,6 @@ jobs:
     - name: Install ffmpeg on Windows
       run: |
         choco install ffmpeg -y
-        refreshenv
 
     - name: Check script syntax
       run: |
