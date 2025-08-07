@@ -3,6 +3,7 @@
 # Coverage files
 .coverage
 coverage.xml
+junit.xml
 
 # Python cache files
 __pycache__/
