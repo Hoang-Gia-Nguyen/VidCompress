@@ -148,6 +148,29 @@ def test_transcode_avi(temp_dir, sample_videos):
     output_path = os.path.splitext(video_path)[0] + '.mkv'
     assert os.path.exists(output_path)
 
+def test_mkv_reencoding_with_keep_original(temp_dir):
+    """Test that re-encoding an MKV file with keep_original=True creates a new file with _re-encoded suffix"""
+    # Create a test MKV file that needs re-encoding (using h264 instead of HEVC)
+    test_mkv = create_test_video(temp_dir, 'test_mkv', 'libx264', 'aac', 'mkv')
+    
+    # Set up isolated test environment
+    test_dir, video_path = setup_test_video(temp_dir, test_mkv)
+    
+    # Run the main function with keep_original=True
+    main(test_dir, True)
+    
+    # Check that original file still exists
+    assert os.path.exists(video_path), "Original file should be preserved"
+    
+    # Check that re-encoded file exists with correct suffix
+    base_name = os.path.splitext(video_path)[0]
+    re_encoded_path = f"{base_name}_re-encoded.mkv"
+    assert os.path.exists(re_encoded_path), "Re-encoded file should be created with _re-encoded suffix"
+    
+    # Verify that no temporary file is left behind
+    temp_path = base_name + '.temp.mkv'
+    assert not os.path.exists(temp_path), "Temporary file should be cleaned up"
+
 def test_main_nested_folders(temp_dir, sample_videos):
     # Create test directory with nested structure
     test_dir = os.path.join(temp_dir, 'nested_test')
