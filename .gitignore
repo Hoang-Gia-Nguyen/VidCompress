@@ -1,1 +1,5 @@
 .DS_Store
+
+# Coverage files
+.coverage
+coverage.xml
