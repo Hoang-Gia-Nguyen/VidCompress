@@ -140,12 +140,23 @@ def test_main_with_non_video_file(temp_dir):
 
 def setup_test_video(temp_dir, video_path):
     """Set up a clean test directory with a single video"""
-    test_dir = os.path.join(temp_dir, 'test_video')
-    os.makedirs(test_dir, exist_ok=True)
+    # Create a unique test directory for each test run
+    test_dir = os.path.join(temp_dir, f'test_video_{os.path.basename(video_path)}')
+    if os.path.exists(test_dir):
+        shutil.rmtree(test_dir)
+    os.makedirs(test_dir)
     
     # Create a clean copy of the test video
     test_video = os.path.join(test_dir, os.path.basename(video_path))
     shutil.copy2(video_path, test_video)
+    
+    # Clean any potential temporary files
+    temp_mkv = os.path.splitext(test_video)[0] + '.temp.mkv'
+    output_mkv = os.path.splitext(test_video)[0] + '.mkv'
+    for path in [temp_mkv, output_mkv]:
+        if os.path.exists(path):
+            os.remove(path)
+            
     return test_dir, test_video
 
 def test_transcode_h264(temp_dir, sample_videos):
@@ -196,7 +207,7 @@ def test_multi_audio_tracks(temp_dir, sample_videos):
         '-print_format', 'json',
         '-show_streams',
         output_path
-    ], capture_output=True, text=True)
+    ], check=True, capture_output=True, text=True)
     
     info = json.loads(result.stdout)
     audio_streams = [s for s in info['streams'] if s['codec_type'] == 'audio']
