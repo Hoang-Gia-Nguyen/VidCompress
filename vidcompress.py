@@ -5,6 +5,7 @@ import sys
 import time
 import json
 import argparse
+import shutil
 
 # This comment is to trigger the GitHub Actions workflow on the development branch.
 
@@ -127,11 +128,37 @@ def main(folder_path, keep_original):
             if input_path.lower().endswith('.mkv'):
                 temp_output_path = os.path.splitext(input_path)[0] + '.temp.mkv'
                 print(f'Re-encoding {input_path} to {temp_output_path}...')
+                
+                # Remove any existing temporary file
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
+                
                 if transcode_file(input_path, temp_output_path, use_videotoolbox):
-                    if not keep_original:
-                        os.remove(input_path)
-                    os.rename(temp_output_path, input_path)
-                    print(f'Successfully re-encoded {input_path}')
+                    try:
+                        # Determine the final output path based on keep_original flag
+                        target_dir = os.path.dirname(input_path)
+                        base_name = os.path.splitext(os.path.basename(input_path))[0]
+                        
+                        if keep_original:
+                            # Create a new filename with _re-encoded suffix
+                            final_path = os.path.join(target_dir, f"{base_name}_re-encoded.mkv")
+                        else:
+                            final_path = input_path
+                        
+                        # Ensure target directory exists
+                        os.makedirs(target_dir, exist_ok=True)
+                        
+                        if not keep_original and os.path.exists(input_path):
+                            # For non-keep-original case, remove input after successful re-encoding
+                            os.remove(input_path)
+                            
+                        # Move temp file to final destination
+                        shutil.move(temp_output_path, final_path)
+                        print(f'Successfully re-encoded to {final_path}')
+                    except Exception as e:
+                        print(f'Error during file operation: {e}')
+                        if os.path.exists(temp_output_path):
+                            os.remove(temp_output_path)
                 else:
                     print(f'Failed to re-encode {input_path}')
                     if os.path.exists(temp_output_path):
@@ -158,5 +185,10 @@ if __name__ == '__main__':
     parser.add_argument('--keep-original', action='store_true', help='Do not delete the original file after successful transcoding.')
     
     args = parser.parse_args()
+    
+    # Validate the input path
+    if not os.path.exists(args.folder_path):
+        print(f"Error: No such file or directory: '{args.folder_path}'", file=sys.stderr)
+        sys.exit(1)
     
     main(args.folder_path, args.keep_original)
