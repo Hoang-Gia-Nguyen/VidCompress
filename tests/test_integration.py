@@ -4,8 +4,12 @@ import tempfile
 import shutil
 import subprocess
 import json
+import sys
 from pathlib import Path
-from vidcompress import main
+
+# Ensure the project root is on sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from vidcompress import main, get_media_info
 
 @pytest.fixture
 def temp_dir():
@@ -83,7 +87,7 @@ def sample_videos(temp_dir):
     return videos
 
 def test_main_empty_folder(temp_dir):
-    main(temp_dir, True)
+    main(temp_dir, True, 'h.265', 'mkv')
     assert len(os.listdir(temp_dir)) == 0
 
 def test_main_with_non_video_file(temp_dir):
@@ -91,8 +95,8 @@ def test_main_with_non_video_file(temp_dir):
     text_file = os.path.join(temp_dir, 'test.txt')
     with open(text_file, 'w') as f:
         f.write('test content')
-    
-    main(temp_dir, True)
+
+    main(temp_dir, True, 'h.265', 'mkv')
     assert os.path.exists(text_file)
 
 def setup_test_video(temp_dir, video_path):
@@ -120,33 +124,32 @@ def test_transcode_h264(temp_dir, sample_videos):
     # Set up isolated test environment
     test_dir, video_path = setup_test_video(temp_dir, sample_videos['h264_aac'])
     
-    main(test_dir, True)
+    main(test_dir, True, 'h.265', 'mkv')
     # Check that original file exists (keep_original=True)
     assert os.path.exists(video_path)
-    # Check that output file is created with .mkv extension
-    output_path = os.path.splitext(video_path)[0] + '.mkv'
+    # Check that output file is created with _transcoded suffix
+    output_path = os.path.splitext(video_path)[0] + '_transcoded.mkv'
     assert os.path.exists(output_path)
 
 def test_transcode_webm(temp_dir, sample_videos):
     # Set up isolated test environment
     test_dir, video_path = setup_test_video(temp_dir, sample_videos['vp8_vorbis'])
     
-    main(test_dir, False)
-    # Original file should be deleted (keep_original=False)
-    assert not os.path.exists(video_path)
-    # Check that output file is created with .mkv extension
-    output_path = os.path.splitext(video_path)[0] + '.mkv'
-    assert os.path.exists(output_path)
+    main(test_dir, False, 'h.265', 'mkv')
+    # Final file should exist at original path
+    assert os.path.exists(video_path)
+    info = get_media_info(video_path)
+    assert info and 'matroska' in info.get('format', {}).get('format_name', '')
 
 def test_transcode_avi(temp_dir, sample_videos):
     # Set up isolated test environment
     test_dir, video_path = setup_test_video(temp_dir, sample_videos['mpeg4_mp3'])
     
-    main(test_dir, False)
+    main(test_dir, False, 'h.265', 'mkv')
     # Check conversion from AVI (MPEG4+MP3) to MKV (HEVC+AAC)
-    assert not os.path.exists(video_path)  # Original deleted
-    output_path = os.path.splitext(video_path)[0] + '.mkv'
-    assert os.path.exists(output_path)
+    assert os.path.exists(video_path)
+    info = get_media_info(video_path)
+    assert info and 'matroska' in info.get('format', {}).get('format_name', '')
 
 def test_main_nested_folders(temp_dir, sample_videos):
     # Create test directory with nested structure
@@ -158,7 +161,7 @@ def test_main_nested_folders(temp_dir, sample_videos):
     nested_video = os.path.join(nested_dir, 'test.mp4')
     shutil.copy2(sample_videos['h264_aac'], nested_video)
     
-    main(test_dir, True)
+    main(test_dir, True, 'h.265', 'mkv')
     assert os.path.exists(nested_video)
 
 def test_keep_original_mkv(temp_dir, sample_videos):
@@ -172,7 +175,7 @@ def test_keep_original_mkv(temp_dir, sample_videos):
     test_video1 = os.path.join(test_dir1, os.path.basename(test_video))
     shutil.copy2(test_video, test_video1)
     
-    main(test_dir1, True)
+    main(test_dir1, True, 'h.265', 'mkv')
     base_name1 = os.path.splitext(test_video1)[0]
     re_encoded_path = f"{base_name1}_re-encoded.mkv"
     
@@ -189,7 +192,7 @@ def test_keep_original_mkv(temp_dir, sample_videos):
     # Store file modification time of original
     orig_mtime = os.path.getmtime(test_video2)
     
-    main(test_dir2, False)
+    main(test_dir2, False, 'h.265', 'mkv')
     
     # Check that a file exists at the original path
     assert os.path.exists(test_video2), "Re-encoded file should exist at original path"
