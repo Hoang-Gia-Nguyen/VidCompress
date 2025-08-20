@@ -47,26 +47,36 @@ def get_duration(media_info):
     """
     return float(media_info.get('format', {}).get('duration', 0))
 
-def is_videotoolbox_available():
+def is_videotoolbox_available(codec_type):
     """
-    Checks if VideoToolbox is available for HEVC encoding.
+    Checks if VideoToolbox is available for the specified codec type.
     """
     try:
         result = subprocess.run([get_ffmpeg_path(), '-codecs'], capture_output=True, text=True, check=True)
-        return 'hevc_videotoolbox' in result.stdout
+        if codec_type == 'hevc':
+            return 'hevc_videotoolbox' in result.stdout
+        elif codec_type == 'h264':
+            return 'h264_videotoolbox' in result.stdout
+        return False
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
-def transcode_file(input_path, output_path, use_videotoolbox):
+def transcode_file(input_path, output_path, video_codec_choice):
     """
     Transcodes the input file to the desired format.
     """
-    video_codec = 'hevc_videotoolbox' if use_videotoolbox else 'libx265'
+    ffmpeg_video_codec = ''
+    if video_codec_choice == 'h.265':
+        ffmpeg_video_codec = 'hevc_videotoolbox' if is_videotoolbox_available('hevc') else 'libx265'
+    elif video_codec_choice == 'h.264':
+        ffmpeg_video_codec = 'h264_videotoolbox' if is_videotoolbox_available('h264') else 'libx264'
+    elif video_codec_choice == 'vp9':
+        ffmpeg_video_codec = 'libvpx-vp9'
     
     command = [
         get_ffmpeg_path(),
         '-i', input_path,
-        '-c:v', video_codec,
+        '-c:v', ffmpeg_video_codec,
         '-c:a', 'aac',
         '-ac', '2',
         '-y',
@@ -83,15 +93,34 @@ def transcode_file(input_path, output_path, use_videotoolbox):
     return process.returncode == 0
 
 
-def main(folder_path, keep_original):
+def remux_file(input_path, output_path):
+    """
+    Remuxes the input file to a new container without re-encoding.
+    """
+    command = [
+        get_ffmpeg_path(),
+        '-i', input_path,
+        '-c', 'copy',
+        '-y',
+        output_path
+    ]
+
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    process.wait()
+    return process.returncode == 0
+
+
+def main(folder_path, keep_original, video_codec_choice, container_choice):
     """
     Scans the folder for media files and converts them if necessary.
     """
-    use_videotoolbox = is_videotoolbox_available()
-    if use_videotoolbox:
-        print("VideoToolbox is available. Using hardware acceleration.")
-    else:
-        print("VideoToolbox is not available. Using software encoding.")
+    print(f"Selected video codec: {video_codec_choice}")
+    print(f"Selected container: {container_choice}")
 
     VIDEO_EXTENSIONS = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m2ts']
     for root, _, files in os.walk(folder_path):
@@ -117,23 +146,75 @@ def main(folder_path, keep_original):
             audio_codec = audio_stream.get('codec_name') if audio_stream else ''
             audio_channels = audio_stream.get('channels') if audio_stream else 0
 
-            is_correct_format = container == 'matroska,webm' and video_codec == 'hevc' and audio_codec == 'aac' and audio_channels == 2
+            # Determine the expected container name based on the choice
+            expected_container_name = ''
+            if container_choice == 'mp4':
+                expected_container_name = 'mov,mp4,m4a,3gp,3g2,mj2'
+            elif container_choice == 'mkv':
+                expected_container_name = 'matroska,webm'
 
-            if is_correct_format:
-                print(f'Skipping {input_path} (already in the correct format)')
+            # Determine the expected video codec name based on the choice
+            expected_video_codec = ''
+            if video_codec_choice == 'h.265':
+                expected_video_codec = 'hevc'
+            elif video_codec_choice == 'h.264':
+                expected_video_codec = 'h264'
+            elif video_codec_choice == 'vp9':
+                expected_video_codec = 'vp9'
+
+            is_video_codec_match = video_codec == expected_video_codec
+            is_audio_codec_match = audio_codec == 'aac' and audio_channels == 2
+            is_container_match = container == expected_container_name
+
+            if is_video_codec_match and is_audio_codec_match and is_container_match:
+                print(f'Skipping {input_path} (already in the correct format and container)')
                 continue
 
-            output_path = os.path.splitext(input_path)[0] + '.mkv'
-            
-            if input_path.lower().endswith('.mkv'):
-                temp_output_path = os.path.splitext(input_path)[0] + '.temp.mkv'
+            output_path = os.path.splitext(input_path)[0] + '.' + container_choice
+            temp_output_path = os.path.splitext(input_path)[0] + '.temp.' + container_choice
+
+            # Check if only remuxing is needed
+            if is_video_codec_match and is_audio_codec_match and not is_container_match:
+                print(f'Remuxing {input_path} to {output_path} (codecs match, container different)...')
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
+                
+                if remux_file(input_path, temp_output_path):
+                    try:
+                        target_dir = os.path.dirname(input_path)
+                        base_name = os.path.splitext(os.path.basename(input_path))[0]
+                        
+                        if keep_original:
+                            final_path = os.path.join(target_dir, f"{base_name}_remuxed.{container_choice}")
+                        else:
+                            final_path = input_path
+                        
+                        os.makedirs(target_dir, exist_ok=True)
+                        
+                        if not keep_original and os.path.exists(input_path):
+                            os.remove(input_path)
+                            
+                        shutil.move(temp_output_path, final_path)
+                        print(f'Successfully remuxed to {final_path}')
+                    except Exception as e:
+                        print(f'Error during file operation: {e}')
+                        if os.path.exists(temp_output_path):
+                            os.remove(temp_output_path)
+                else:
+                    print(f'Failed to remux {input_path}')
+                    if os.path.exists(temp_output_path):
+                        os.remove(temp_output_path)
+                continue # Move to next file after remux attempt
+
+            # Original transcoding logic for when re-encoding is needed
+            if input_path.lower().endswith(f'.{container_choice}'):
                 print(f'Re-encoding {input_path} to {temp_output_path}...')
                 
                 # Remove any existing temporary file
                 if os.path.exists(temp_output_path):
                     os.remove(temp_output_path)
                 
-                if transcode_file(input_path, temp_output_path, use_videotoolbox):
+                if transcode_file(input_path, temp_output_path, video_codec_choice):
                     try:
                         # Determine the final output path based on keep_original flag
                         target_dir = os.path.dirname(input_path)
@@ -141,7 +222,7 @@ def main(folder_path, keep_original):
                         
                         if keep_original:
                             # Create a new filename with _re-encoded suffix
-                            final_path = os.path.join(target_dir, f"{base_name}_re-encoded.mkv")
+                            final_path = os.path.join(target_dir, f"{base_name}_re-encoded.{container_choice}")
                         else:
                             final_path = input_path
                         
@@ -164,25 +245,56 @@ def main(folder_path, keep_original):
                     if os.path.exists(temp_output_path):
                         os.remove(temp_output_path)
             else:
-                if os.path.exists(output_path):
-                    print(f'Removing {input_path} since correctly formatted file already exists')
-                    if not keep_original:
-                        os.remove(input_path)
-                    continue
+                # If the input file is not already in the target container, always transcode/remux to a temp file first
+                print(f'Processing {input_path} to {temp_output_path}...')
+                
+                # Remove any existing temporary file
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
 
-                print(f'Transcoding {input_path} to {output_path}...')
-                if transcode_file(input_path, output_path, use_videotoolbox):
-                    print(f'Successfully transcoded {input_path}')
-                    if not keep_original:
-                        os.remove(input_path)
+                success = False
+                if is_video_codec_match and is_audio_codec_match:
+                    success = remux_file(input_path, temp_output_path)
+                    action_type = "remuxed"
                 else:
-                    print(f'Failed to transcode {input_path}')
+                    success = transcode_file(input_path, temp_output_path, video_codec_choice)
+                    action_type = "transcoded"
+
+                if success:
+                    try:
+                        target_dir = os.path.dirname(input_path)
+                        base_name = os.path.splitext(os.path.basename(input_path))[0]
+                        
+                        if keep_original:
+                            final_path = os.path.join(target_dir, f"{base_name}_{action_type}.{container_choice}")
+                        else:
+                            final_path = input_path
+                        
+                        os.makedirs(target_dir, exist_ok=True)
+                        
+                        if not keep_original and os.path.exists(input_path):
+                            os.remove(input_path)
+                            
+                        shutil.move(temp_output_path, final_path)
+                        print(f'Successfully {action_type} to {final_path}')
+                    except Exception as e:
+                        print(f'Error during file operation: {e}')
+                        if os.path.exists(temp_output_path):
+                            os.remove(temp_output_path)
+                else:
+                    print(f'Failed to {action_type} {input_path}')
+                    if os.path.exists(temp_output_path):
+                        os.remove(temp_output_path)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='VidCompress: Transcode video files to HEVC/AAC MKV format.')
+    parser = argparse.ArgumentParser(description='VidCompress: Transcode video files to specified format.')
     parser.add_argument('folder_path', type=str, help='The path to the folder containing video files.')
     parser.add_argument('--keep-original', action='store_true', help='Do not delete the original file after successful transcoding.')
+    parser.add_argument('--video-codec', type=str, default='h.265', choices=['h.265', 'h.264', 'vp9'],
+                        help='Video codec to use for transcoding (default: h.265).')
+    parser.add_argument('--container', type=str, default='mp4', choices=['mkv', 'mp4'],
+                        help='Container format for the output file (default: mp4).')
     
     args = parser.parse_args()
     
@@ -191,4 +303,4 @@ if __name__ == '__main__':
         print(f"Error: No such file or directory: '{args.folder_path}'", file=sys.stderr)
         sys.exit(1)
     
-    main(args.folder_path, args.keep_original)
+    main(args.folder_path, args.keep_original, args.video_codec, args.container)
