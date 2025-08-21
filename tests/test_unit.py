@@ -24,8 +24,11 @@ from vidcompress import (
     get_duration,
     is_videotoolbox_available,
     transcode_file,
+    remux_file,
     main
 )
+
+FFMPEG_EXISTS = shutil.which('ffmpeg') is not None
 
 def test_get_ffmpeg_path():
     assert get_ffmpeg_path() == 'ffmpeg'
@@ -89,6 +92,14 @@ def test_is_videotoolbox_available_false(mock_run):
     )
     assert is_videotoolbox_available('hevc') is False
 
+@patch('subprocess.run')
+def test_is_videotoolbox_available_h264(mock_run):
+    mock_run.return_value = MagicMock(
+        stdout='h264_videotoolbox',
+        returncode=0
+    )
+    assert is_videotoolbox_available('h264') is True
+
 @patch('vidcompress.is_videotoolbox_available', return_value=False)
 @patch('subprocess.Popen')
 def test_transcode_file_success(mock_popen, mock_vt):
@@ -108,6 +119,24 @@ def test_transcode_file_failure(mock_popen, mock_vt):
     mock_popen.return_value = mock_process
 
     assert transcode_file('input.mp4', 'output.mkv', 'h.265') is False
+
+@patch('subprocess.Popen')
+def test_remux_file_success(mock_popen):
+    mock_process = MagicMock()
+    mock_process.returncode = 0
+    mock_process.stdout = []
+    mock_popen.return_value = mock_process
+
+    assert remux_file('input.mkv', 'output.mkv') is True
+
+@patch('subprocess.Popen')
+def test_remux_file_failure(mock_popen):
+    mock_process = MagicMock()
+    mock_process.returncode = 1
+    mock_process.stdout = []
+    mock_popen.return_value = mock_process
+
+    assert remux_file('input.mkv', 'output.mkv') is False
 
 @patch('subprocess.run')
 def test_get_media_info_json_decode_error(mock_run):
@@ -262,6 +291,7 @@ def test_cli_invalid_path():
     # Script should exit with non-zero status for invalid paths
     assert result.returncode == 1
 
+@pytest.mark.skipif(not FFMPEG_EXISTS, reason="ffmpeg not installed")
 def test_cli_with_keep_original(cli_temp_dir):
     """Test CLI with --keep-original flag"""
     # Create a test video file with h264 content to ensure it needs transcoding
@@ -283,6 +313,7 @@ def test_cli_with_keep_original(cli_temp_dir):
     re_encoded = os.path.join(cli_temp_dir, "test_transcoded.mp4")
     assert os.path.exists(re_encoded), "Transcoded file should exist"
 
+@pytest.mark.skipif(not FFMPEG_EXISTS, reason="ffmpeg not installed")
 def test_cli_without_keep_original(cli_temp_dir):
     """Test CLI without --keep-original flag"""
     # Create a test video file with h264 content
