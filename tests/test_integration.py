@@ -11,6 +11,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from vidcompress import main, get_media_info
 
+pytestmark = pytest.mark.skipif(shutil.which('ffmpeg') is None, reason="ffmpeg not installed")
+
 @pytest.fixture
 def temp_dir():
     temp_dir = tempfile.mkdtemp()
