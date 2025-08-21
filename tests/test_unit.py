@@ -275,7 +275,7 @@ def test_cli_with_keep_original(cli_temp_dir):
     ], check=True, capture_output=True)
     
     result = subprocess.run(
-        ['/Volumes/KINGSTON/Workspace/transcode-app/.venv/bin/python', 'vidcompress.py', cli_temp_dir, '--keep-original'],
+        ['python', 'vidcompress.py', cli_temp_dir, '--keep-original'],
         capture_output=True, text=True
     )
     assert result.returncode == 0, f"CLI failed with output: {result.stderr}"
