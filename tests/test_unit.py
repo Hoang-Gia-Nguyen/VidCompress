@@ -247,7 +247,7 @@ def test_main_error_handling(mock_remove, mock_makedirs, mock_exists,
 
 def test_cli_help():
     """Test that the CLI help command works and shows usage information"""
-    result = subprocess.run(['/Volumes/KINGSTON/Workspace/transcode-app/.venv/bin/python', 'vidcompress.py', '--help'], 
+    result = subprocess.run(['python', 'vidcompress.py', '--help'], 
                           capture_output=True, text=True)
     assert result.returncode == 0
     assert 'usage:' in result.stdout.lower()
