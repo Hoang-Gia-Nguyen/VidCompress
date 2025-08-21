@@ -247,7 +247,7 @@ def test_main_error_handling(mock_remove, mock_makedirs, mock_exists,
 
 def test_cli_help():
     """Test that the CLI help command works and shows usage information"""
-    result = subprocess.run(['python', 'vidcompress.py', '--help'], 
+    result = subprocess.run(['/Volumes/KINGSTON/Workspace/transcode-app/.venv/bin/python', 'vidcompress.py', '--help'], 
                           capture_output=True, text=True)
     assert result.returncode == 0
     assert 'usage:' in result.stdout.lower()
@@ -256,7 +256,7 @@ def test_cli_help():
 
 def test_cli_invalid_path():
     """Test CLI behavior with an invalid path"""
-    result = subprocess.run(['python', 'vidcompress.py', '/nonexistent/path'], 
+    result = subprocess.run(['/Volumes/KINGSTON/Workspace/transcode-app/.venv/bin/python', 'vidcompress.py', '/nonexistent/path'], 
                           capture_output=True, text=True)
     assert 'No such file or directory' in result.stderr
     # Script should exit with non-zero status for invalid paths
@@ -275,7 +275,7 @@ def test_cli_with_keep_original(cli_temp_dir):
     ], check=True, capture_output=True)
     
     result = subprocess.run(
-        ['python', 'vidcompress.py', cli_temp_dir, '--keep-original'],
+        ['/Volumes/KINGSTON/Workspace/transcode-app/.venv/bin/python', 'vidcompress.py', cli_temp_dir, '--keep-original'],
         capture_output=True, text=True
     )
     assert result.returncode == 0, f"CLI failed with output: {result.stderr}"

@@ -164,7 +164,7 @@ def main(folder_path, keep_original, video_codec_choice, container_choice):
 
             is_video_codec_match = video_codec == expected_video_codec
             is_audio_codec_match = audio_codec == 'aac' and audio_channels == 2
-            is_container_match = container == expected_container_name
+            is_container_match = container in expected_container_name.split(',')
 
             if is_video_codec_match and is_audio_codec_match and is_container_match:
                 print(f'Skipping {input_path} (already in the correct format and container)')
