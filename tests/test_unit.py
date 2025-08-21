@@ -256,7 +256,7 @@ def test_cli_help():
 
 def test_cli_invalid_path():
     """Test CLI behavior with an invalid path"""
-    result = subprocess.run(['python', 'vidcompress.py', '/nonexistent/path'], 
+    result = subprocess.run(['/Volumes/KINGSTON/Workspace/transcode-app/.venv/bin/python', 'vidcompress.py', '/nonexistent/path'], 
                           capture_output=True, text=True)
     assert 'No such file or directory' in result.stderr
     # Script should exit with non-zero status for invalid paths
