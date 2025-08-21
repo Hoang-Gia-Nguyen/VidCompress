@@ -9,3 +9,12 @@ junit.xml
 __pycache__/
 *.py[cod]
 *$py.class
+
+# gemini file
+GEMINI.md
+
+# Test output directory
+test_output/
+testoutput/
+allure-results/
+TEST_STRATEGY.md

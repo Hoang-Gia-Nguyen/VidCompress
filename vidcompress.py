@@ -129,9 +129,12 @@ def main(folder_path, keep_original, video_codec_choice, container_choice):
                 continue
 
             input_path = os.path.join(root, file)
+            print(f"[DEBUG] Processing file: {input_path}")
             media_info = get_media_info(input_path)
 
             if not media_info:
+                print(f"Failed to get media info for {input_path}. Skipping.", file=sys.stderr)
+                sys.stderr.flush()
                 continue
 
             video_stream = next((stream for stream in media_info.get('streams', []) if stream.get('codec_type') == 'video'), None)
@@ -164,127 +167,109 @@ def main(folder_path, keep_original, video_codec_choice, container_choice):
 
             is_video_codec_match = video_codec == expected_video_codec
             is_audio_codec_match = audio_codec == 'aac' and audio_channels == 2
-            is_container_match = container in expected_container_name.split(',')
+            is_container_match = container in expected_container_name.split(',') or container == expected_container_name
+
 
             if is_video_codec_match and is_audio_codec_match and is_container_match:
                 print(f'Skipping {input_path} (already in the correct format and container)')
                 continue
 
-            output_path = os.path.splitext(input_path)[0] + '.' + container_choice
-            temp_output_path = os.path.splitext(input_path)[0] + '.temp.' + container_choice
+            # Determine if transcoding or remuxing is needed
+            needs_transcoding = not (is_video_codec_match and is_audio_codec_match)
+            needs_remuxing = not is_container_match
 
-            # Check if only remuxing is needed
-            if is_video_codec_match and is_audio_codec_match and not is_container_match:
-                print(f'Remuxing {input_path} to {output_path} (codecs match, container different)...')
-                if os.path.exists(temp_output_path):
-                    os.remove(temp_output_path)
-                
-                if remux_file(input_path, temp_output_path):
-                    try:
-                        target_dir = os.path.dirname(input_path)
-                        base_name = os.path.splitext(os.path.basename(input_path))[0]
-                        
-                        if keep_original:
-                            final_path = os.path.join(target_dir, f"{base_name}_remuxed.{container_choice}")
-                        else:
-                            final_path = input_path
-                        
-                        os.makedirs(target_dir, exist_ok=True)
-                        
-                        if not keep_original and os.path.exists(input_path):
-                            os.remove(input_path)
-                            
-                        shutil.move(temp_output_path, final_path)
-                        print(f'Successfully remuxed to {final_path}')
-                    except Exception as e:
-                        print(f'Error during file operation: {e}')
-                        if os.path.exists(temp_output_path):
-                            os.remove(temp_output_path)
-                else:
-                    print(f'Failed to remux {input_path}')
-                    if os.path.exists(temp_output_path):
-                        os.remove(temp_output_path)
-                continue # Move to next file after remux attempt
+            if not needs_transcoding and not needs_remuxing:
+                print(f'Skipping {input_path} (already in the correct format and container)')
+                continue
 
-            # Original transcoding logic for when re-encoding is needed
-            if input_path.lower().endswith(f'.{container_choice}'):
-                print(f'Re-encoding {input_path} to {temp_output_path}...')
-                
-                # Remove any existing temporary file
-                if os.path.exists(temp_output_path):
+            output_path_stem = os.path.splitext(input_path)[0]
+            temp_output_path = f"{output_path_stem}.temp.{container_choice}"
+            final_output_name_suffix = ""
+
+            # Remove any existing temporary file before starting
+            if os.path.exists(temp_output_path):
+                try:
                     os.remove(temp_output_path)
-                
-                if transcode_file(input_path, temp_output_path, video_codec_choice):
-                    try:
-                        # Determine the final output path based on keep_original flag
-                        target_dir = os.path.dirname(input_path)
-                        base_name = os.path.splitext(os.path.basename(input_path))[0]
-                        
-                        if keep_original:
-                            # Create a new filename with _re-encoded suffix
-                            final_path = os.path.join(target_dir, f"{base_name}_re-encoded.{container_choice}")
-                        else:
-                            final_path = input_path
-                        
-                        # Ensure target directory exists
-                        os.makedirs(target_dir, exist_ok=True)
-                        
-                        if not keep_original and os.path.exists(input_path):
-                            # For non-keep-original case, remove input after successful re-encoding
-                            os.remove(input_path)
-                            
-                        # Move temp file to final destination
-                        shutil.move(temp_output_path, final_path)
-                        print(f'Successfully re-encoded to {final_path}')
-                    except Exception as e:
-                        print(f'Error during file operation: {e}')
-                        if os.path.exists(temp_output_path):
-                            os.remove(temp_output_path)
-                else:
-                    print(f'Failed to re-encode {input_path}')
-                    if os.path.exists(temp_output_path):
-                        os.remove(temp_output_path)
+                except OSError as e:
+                    print(f"Error removing existing temporary file {temp_output_path}: {e}", file=sys.stderr)
+                    sys.stderr.flush()
+                    continue # Skip to next file if we can't clean up
+
+            success = False
+            action_type = ""
+
+            if needs_transcoding:
+                action_type = "re-encoded"
+                print(f'Transcoding {input_path} to {temp_output_path}...')
+                print(f"[DEBUG] temp_output_path for transcode: {temp_output_path}")
+                success = transcode_file(input_path, temp_output_path, video_codec_choice)
+            elif needs_remuxing: # Only remuxing is needed
+                action_type = "remuxed"
+                print(f'Remuxing {input_path} to {temp_output_path}...')
+                print(f"[DEBUG] temp_output_path for remux: {temp_output_path}")
+                success = remux_file(input_path, temp_output_path)
             else:
-                # If the input file is not already in the target container, always transcode/remux to a temp file first
-                print(f'Processing {input_path} to {temp_output_path}...')
-                
-                # Remove any existing temporary file
-                if os.path.exists(temp_output_path):
-                    os.remove(temp_output_path)
+                # This case should ideally not be reached if the above logic is correct
+                # It implies a file needs neither transcoding nor remuxing, but wasn't skipped.
+                print(f"Warning: Unexpected state for {input_path}. Skipping.", file=sys.stderr)
+                sys.stderr.flush()
+                continue
 
-                success = False
-                if is_video_codec_match and is_audio_codec_match:
-                    success = remux_file(input_path, temp_output_path)
-                    action_type = "remuxed"
-                else:
-                    success = transcode_file(input_path, temp_output_path, video_codec_choice)
-                    action_type = "transcoded"
+            if success:
+                try:
+                    target_dir = os.path.dirname(input_path)
+                    base_name = os.path.splitext(os.path.basename(input_path))[0]
 
-                if success:
-                    try:
-                        target_dir = os.path.dirname(input_path)
-                        base_name = os.path.splitext(os.path.basename(input_path))[0]
-                        
-                        if keep_original:
-                            final_path = os.path.join(target_dir, f"{base_name}_{action_type}.{container_choice}")
-                        else:
-                            final_path = input_path
-                        
-                        os.makedirs(target_dir, exist_ok=True)
-                        
-                        if not keep_original and os.path.exists(input_path):
+                    if keep_original:
+                        final_path = os.path.join(target_dir, f"{base_name}_{action_type}.{container_choice}")
+                    else:
+                        final_path = os.path.join(target_dir, f"{base_name}.{container_choice}")
+
+                    print(f"[DEBUG] final_path: {final_path}")
+                    print(f"[DEBUG] os.path.exists(input_path) before move: {os.path.exists(input_path)}")
+                    print(f"[DEBUG] os.path.exists(temp_output_path) before move: {os.path.exists(temp_output_path)}")
+
+                    os.makedirs(target_dir, exist_ok=True)
+
+                    # Handle existing original file if not keeping original
+                    if not keep_original and os.path.exists(input_path) and input_path != final_path:
+                        try:
+                            print(f"[DEBUG] Attempting to remove original file: {input_path}")
                             os.remove(input_path)
-                            
-                        shutil.move(temp_output_path, final_path)
-                        print(f'Successfully {action_type} to {final_path}')
-                    except Exception as e:
-                        print(f'Error during file operation: {e}')
-                        if os.path.exists(temp_output_path):
-                            os.remove(temp_output_path)
-                else:
-                    print(f'Failed to {action_type} {input_path}')
+                            time.sleep(0.1)
+                            print(f"[DEBUG] Removed original file: {input_path}")
+                        except OSError as e:
+                            print(f"Error removing original file {input_path}: {e}", file=sys.stderr)
+                            sys.stderr.flush()
+                            continue # Skip to next file if we can't remove original
+
+                    shutil.move(temp_output_path, final_path)
+                    time.sleep(0.1)
+                    print(f'Successfully {action_type} to {final_path}')
+                    print(f"[DEBUG] os.path.exists(final_path) after move: {os.path.exists(final_path)}")
+
+                    
+
+                except Exception as e:
+                    print(f'Error during file operation: {e}', file=sys.stderr)
+                    sys.stderr.flush()
                     if os.path.exists(temp_output_path):
+                        try:
+                            os.remove(temp_output_path)
+                        except OSError as e_remove:
+                            print(f"Error removing temporary file {temp_output_path}: {e_remove}", file=sys.stderr)
+                            sys.stderr.flush()
+                            time.sleep(0.1)
+            else:
+                print(f'Failed to {action_type} {input_path}', file=sys.stderr)
+                sys.stderr.flush()
+                if os.path.exists(temp_output_path):
+                    try:
                         os.remove(temp_output_path)
+                    except OSError as e_remove:
+                        print(f"Error removing temporary file {temp_output_path}: {e_remove}", file=sys.stderr)
+                        sys.stderr.flush()
+                        time.sleep(0.1)
 
 
 if __name__ == '__main__':
@@ -301,6 +286,7 @@ if __name__ == '__main__':
     # Validate the input path
     if not os.path.exists(args.folder_path):
         print(f"Error: No such file or directory: '{args.folder_path}'", file=sys.stderr)
+        sys.stderr.flush()
         sys.exit(1)
     
     main(args.folder_path, args.keep_original, args.video_codec, args.container)
