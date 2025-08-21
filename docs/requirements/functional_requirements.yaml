@@ -1,0 +1,56 @@
+
+# docs/requirements/functional_requirements.yaml
+
+- id: FR-TRANSCODE-001
+  name: Transcode H.264 to H.265 (HEVC)
+  description: The application shall be able to transcode H.264 video files to H.265 (HEVC) format while maintaining AAC audio (2 channels) and outputting to an MP4 container.
+  priority: High
+  tags: [transcoding, h265, mp4, functional]
+  tests:
+    - test_unit.py::test_transcode_h264_to_h265
+    - test_integration.py::test_transcode_h264_to_h265_mocked_ffmpeg
+    - test_e2e.py::test_e2e_transcode_h264_to_h265
+
+- id: FR-REMUX-001
+  name: Remux MKV to MP4 (same codecs)
+  description: The application shall be able to remux MKV files to MP4 containers without re-encoding if the video and audio codecs (e.g., H.264/AAC) are already compatible with MP4.
+  priority: High
+  tags: [remuxing, mkv, mp4, functional]
+  tests:
+    - test_unit.py::test_remux_mkv_to_mp4
+    - test_integration.py::test_remux_mkv_to_mp4_mocked_ffmpeg
+    - test_e2e.py::test_e2e_remux_mkv_to_mp4
+
+- id: FR-KEEP-ORIGINAL-001
+  name: Keep Original File
+  description: The application shall retain the original input file when the `--keep-original` flag is provided, creating a new output file with a suffix.
+  priority: Medium
+  tags: [file_handling, functional]
+  tests:
+    - test_e2e.py::test_e2e_keep_original_flag
+
+- id: FR-ERROR-001
+  name: Handle Invalid Input Path
+  description: The application shall exit with an error message if the provided folder path does not exist.
+  priority: High
+  tags: [error_handling, functional]
+  tests:
+    - test_e2e.py::test_e2e_invalid_input_path
+
+# docs/requirements/non_functional_requirements.yaml
+
+- id: NFR-PERF-001
+  name: Transcoding Performance
+  description: The application should transcode a 1-minute 1080p H.264 video to H.265 within 30 seconds on a standard CI runner.
+  priority: Medium
+  tags: [performance, non_functional]
+  tests:
+    - test_e2e.py::test_e2e_transcoding_performance
+
+- id: NFR-RELIABILITY-001
+  name: Robustness to Corrupted Files
+  description: The application should gracefully handle corrupted or unreadable video files without crashing, skipping them and logging an error.
+  priority: Medium
+  tags: [reliability, non_functional]
+  tests:
+    - test_e2e.py::test_e2e_corrupted_file_handling
