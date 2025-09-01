@@ -179,7 +179,7 @@ def is_videotoolbox_available(codec_type):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
-def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=None, web_optimize_mp4=False):
+def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=None, web_optimize_mp4=None):
     """
     Transcodes the input file to the desired format.
     """
@@ -193,16 +193,20 @@ def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=
     
     command = [get_ffmpeg_path(), '-i', input_path]
 
-    # Explicitly map the primary video and the chosen audio stream
+    # Explicitly map the primary video and one audio stream
     command += ['-map', '0:v:0']
     if audio_map_index is not None:
         command += ['-map', f'0:a:{audio_map_index}']
+    else:
+        command += ['-map', '0:a:0']
 
     # Set codecs
     command += ['-c:v', ffmpeg_video_codec]
-    if audio_map_index is not None:
-        command += ['-c:a', 'aac', '-ac', '2']
-    # Web optimize MP4 if requested
+    # Always standardize audio to AAC stereo
+    command += ['-c:a', 'aac', '-ac', '2']
+    # Web optimize MP4 if requested or when output is MP4 by default
+    if web_optimize_mp4 is None:
+        web_optimize_mp4 = output_path.lower().endswith('.mp4')
     if web_optimize_mp4:
         command += ['-movflags', '+faststart']
     command += ['-y', output_path]
@@ -217,20 +221,24 @@ def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=
     return process.returncode == 0
 
 
-def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=False):
+def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=None):
     """
     Remuxes the input file to a new container without re-encoding.
     """
     command = [get_ffmpeg_path(), '-i', input_path]
 
-    # Explicitly map the primary video and the chosen audio stream
+    # Explicitly map the primary video and one audio stream
     command += ['-map', '0:v:0']
     if audio_map_index is not None:
         command += ['-map', f'0:a:{audio_map_index}']
+    else:
+        command += ['-map', '0:a:0']
 
     # Copy streams as-is
     command += ['-c', 'copy']
-    # Web optimize MP4 if requested
+    # Web optimize MP4 if requested or when output is MP4 by default
+    if web_optimize_mp4 is None:
+        web_optimize_mp4 = output_path.lower().endswith('.mp4')
     if web_optimize_mp4:
         command += ['-movflags', '+faststart']
     command += ['-y', output_path]
@@ -359,9 +367,7 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 success = transcode_file(
                     input_path,
                     temp_output_path,
-                    video_codec_choice,
-                    preferred_audio_index,
-                    web_optimize_mp4=(container_choice == 'mp4')
+                    video_codec_choice
                 )
             elif needs_remuxing: # Only remuxing is needed
                 action_type = "remuxed"
@@ -369,9 +375,7 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 dprint(f"[DEBUG] temp_output_path for remux: {temp_output_path}")
                 success = remux_file(
                     input_path,
-                    temp_output_path,
-                    preferred_audio_index,
-                    web_optimize_mp4=(container_choice == 'mp4')
+                    temp_output_path
                 )
             else:
                 # This case should ideally not be reached if the above logic is correct
