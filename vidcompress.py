@@ -253,7 +253,60 @@ def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=N
     return process.returncode == 0
 
 
-def main(folder_path, keep_original, video_codec_choice, container_choice, notify_url=None, notify_title=None):
+def extract_subtitles(input_path, output_dir):
+    """
+    Extracts all subtitle streams from a video file into separate SRT files.
+    """
+    media_info = get_media_info(input_path)
+    if not media_info:
+        print(f"Failed to get media info for {input_path}. Skipping subtitle extraction.", file=sys.stderr)
+        return
+
+    subtitle_streams = [s for s in media_info.get('streams', []) if s.get('codec_type') == 'subtitle']
+
+    if not subtitle_streams:
+        dprint(f"[DEBUG] No subtitle streams found in {input_path}")
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    for stream in subtitle_streams:
+        stream_index = stream['index']
+        lang_tags = stream.get('tags', {})
+        language = lang_tags.get('language', 'und') # Default to 'und' (undefined) if no language tag
+        
+        # Construct output filename
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        output_filename = f"{base_name}.{language}.srt"
+        output_path = os.path.join(output_dir, output_filename)
+
+        if os.path.exists(output_path):
+            dprint(f"[DEBUG] Subtitle file {output_path} already exists and will be overwritten.")
+
+        # Check if the subtitle is text-based
+        codec_name = stream.get('codec_name')
+        if codec_name not in ['subrip', 'ass', 'ssa', 'mov_text', 'webvtt']:
+            print(f"Skipping non-text subtitle stream {stream_index} ({codec_name}) in {input_path}", file=sys.stderr)
+            continue
+
+        print(f"Extracting subtitle stream {stream_index} to {output_path}...")
+        
+        command = [
+            get_ffmpeg_path(),
+            '-i', input_path,
+            '-map', f'0:{stream_index}',
+            '-c:s', 'srt',
+            '-y', output_path
+        ]
+        
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            print(f"Successfully extracted subtitle stream {stream_index} to {output_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to extract subtitle stream {stream_index} from {input_path}: {e.stderr}", file=sys.stderr)
+
+
+def main(folder_path, keep_original, video_codec_choice, container_choice, notify_url=None, notify_title=None, extract_subtitles_flag=True):
     """
     Scans the folder for media files and converts them if necessary.
     """
@@ -274,6 +327,9 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 continue
 
             input_path = os.path.join(root, file)
+            if extract_subtitles_flag:
+                extract_subtitles(input_path, root)
+
             total_processed += 1
             dprint(f"[DEBUG] Processing file: {input_path}")
             media_info = get_media_info(input_path)
@@ -478,6 +534,8 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', help='Enable verbose debug output.')
     parser.add_argument('--notify-url', type=str, default='http://localhost:1030/vidcompress', help='ntfy target URL, e.g., http://localhost:1030/vidcompress')
     parser.add_argument('--notify-title', type=str, default='VidCompress', help='Notification title for ntfy')
+    parser.add_argument('--no-extract-subtitles', action='store_false', dest='extract_subtitles', help='Disable subtitle extraction.')
+    parser.set_defaults(extract_subtitles=True)
     
     args = parser.parse_args()
     
@@ -497,4 +555,5 @@ if __name__ == '__main__':
         args.container,
         notify_url=args.notify_url,
         notify_title=args.notify_title,
+        extract_subtitles_flag=args.extract_subtitles
     )
