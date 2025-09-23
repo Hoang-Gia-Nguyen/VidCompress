@@ -1,73 +1,114 @@
 # VidCompress
 
-This Python script transcodes and remuxes video files within a specified folder to a standardized format. It's designed to optimize your media library for storage and playback compatibility, offering flexibility in video codecs and container formats. This script is ideal for use with automation tools like `cron` to automatically process media folders.
+VidCompress scans a folder and standardizes your video files for reliable playback and smaller size. It transcodes when needed, remuxes when possible, picks the preferred audio track, and can send a completion notification.
 
-## Features
+## What You Get
 
-- **Flexible Transcoding**: Supports transcoding to H.265 (HEVC), H.264, or VP9 video codecs.
-- **Container Choice**: Output files can be in MKV or MP4 containers.
-- **Automated Remuxing**: If video and audio codecs already match the target, the script will perform a fast remux (container change only) instead of a full re-encode.
-- **Standardized Audio**: Always converts audio to AAC (2-channel).
-- **Hardware Acceleration**: Automatically utilizes Apple's VideoToolbox for HEVC/H.264 encoding on macOS, if available, for faster processing.
-- **Skipping**: Skips files that are already in the target format and container.
-- **Supported Formats**: Processes files with common video extensions, including `.mkv`, `.mp4`, `.avi`, `.mov`, `.wmv`, `.flv`, `.webm`, and `.m2ts`.
+- Flexible video codecs: H.265 (HEVC), H.264, or VP9
+- Output containers: MP4 or MKV
+- Smart remux: copy streams when codecs already match
+- Standardized audio: AAC stereo (2 channels)
+- MP4 faststart: web‑optimized MP4 when targeting MP4
+- macOS hardware acceleration: uses VideoToolbox if available
 
-## Prerequisites
+## Requirements
 
-Before running the script, ensure you have the following installed and accessible in your system's PATH:
+- Python 3.11+ recommended
+- FFmpeg and FFprobe available in `PATH`
+- Optional for notifications: `curl` and an ntfy server/topic
 
-- **Python 3.x**: Download from [python.org](https://www.python.org/downloads/).
-- **FFmpeg and FFprobe**: These command-line tools are essential for media processing. 
-    - **macOS**: Install via Homebrew: `brew install ffmpeg`
-    - **Linux (Debian/Ubuntu)**: Install via apt: `sudo apt update && sudo apt install ffmpeg`
-    - **Windows**: Download static builds from the [official FFmpeg website](https://ffmpeg.org/download.html) and add the `bin` directory to your system's PATH environment variable.
+Install FFmpeg/FFprobe:
+- macOS: `brew install ffmpeg`
+- Ubuntu/Debian: `sudo apt update && sudo apt install -y ffmpeg`
+- Windows (PowerShell admin): `choco install ffmpeg -y` (or download from ffmpeg.org and add `bin` to `PATH`)
 
-## Usage
+## Install
 
-1.  **Navigate to the script directory**:
-    ```bash
-    cd ./VidCompress
-    ```
+Clone and (optionally) use a virtual environment. The script uses only the Python standard library.
 
-2.  **Run the script**:
-    Provide the absolute path to the folder containing your video files as an argument. You can customize the video codec and container, and also use the `--keep-original` flag to prevent the deletion of original files after successful processing.
+```bash
+git clone https://github.com/your-user/VidCompress.git
+cd VidCompress
 
-    ```bash
-    python vidcompress.py /path/to/your/video/folder \
-        [--video-codec {h.265,h.264,vp9}] \
-        [--container {mkv,mp4}] \
-        [--keep-original]
-    ```
-    
-    **Default Options**: If no `--video-codec` or `--container` is specified, the script defaults to `h.265` video codec and `mp4` container.
+# Optional but recommended
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python -V  # should be 3.11+
+```
 
-    Replace `/path/to/your/video/folder` with the actual path to the directory you want to process.
+## Quick Start
 
-    **Examples**:
-    ```bash
-    # Process with default H.265 video and MP4 container
-    python vidcompress.py "/Users/YourUser/Videos/Movies to Process"
+Run against a folder containing videos:
 
-    # Process with H.264 video and MKV container, keeping original files
-    python vidcompress.py "/Users/YourUser/Videos/Movies to Process" --video-codec h.264 --container mkv --keep-original
+```bash
+python vidcompress.py "/path/to/your/video/folder"
+```
 
-    # Process with VP9 video and WebM container (note: WebM is a subset of MKV for VP9)
-    python vidcompress.py "/Users/YourUser/Videos/Movies to Process" --video-codec vp9 --container mkv
-    ```
+Defaults:
+- `--video-codec`: `h.265`
+- `--container`: `mp4`
+- Original files are deleted after a successful process unless `--keep-original` is set
+- Notifications: by default sends to `http://localhost:1030/vidcompress` if reachable
 
-## How it Works
+## Command Line Options
 
-The script performs the following steps:
+```bash
+python vidcompress.py FOLDER \
+  [--video-codec {h.265,h.264,vp9}] \
+  [--container {mkv,mp4}] \
+  [--keep-original] \
+  [--notify-url URL] \
+  [--notify-title TITLE] \
+  [--debug]
+```
 
-1.  **Checks for VideoToolbox**: Determines if macOS hardware acceleration for HEVC/H.264 is available.
-2.  **Scans Folder**: Iterates through all files in the specified folder and its subfolders.
-3.  **Identifies Video Files**: Processes files with common video extensions, including `.mkv`, `.mp4`, `.avi`, `.mov`, `.wmv`, `.flv`, `.webm`, and `.m2ts`.
-4.  **Analyzes Media Info**: Uses `ffprobe` to get detailed information about each video file (container, video codec, audio codec, channels).
-5.  **Conditional Processing**: 
-    - If a file is already in the target video codec, audio codec, and container, it's skipped.
-    - If video and audio codecs match the target but the container is different, it performs a fast **remux** (container change only).
-    - Otherwise, it performs a full **transcode** to the specified video codec (using hardware acceleration if available) and AAC 2-channel audio.
-6.  **Cleans Up**: Upon successful processing (transcoding or remuxing), the original video file is deleted by default. You can prevent this by using the `--keep-original` flag.
+- `FOLDER`: Path to the folder to process (recurses into subfolders).
+- `--video-codec`: Target video codec. Chooses VideoToolbox on macOS when available.
+- `--container`: Target container (`mp4` or `mkv`). When `mp4` and codecs already match, VidCompress ensures MP4 is faststart‑optimized.
+- `--keep-original`: Keep the original file after a successful transcode/remux.
+- `--notify-url`: ntfy endpoint, e.g. `http://localhost:1030/vidcompress`. To disable notifications, pass an empty value: `--notify-url ''`.
+- `--notify-title`: Notification title (default: `VidCompress`).
+- `--debug`: Verbose debug output to stdout.
+
+Environment variables (optional):
+- `NTFY_URL`: Default notification URL if `--notify-url` is not provided.
+- `NTFY_TITLE`: Default notification title.
+
+## Examples
+
+Transcode to H.265 in MP4, deleting originals (default):
+```bash
+python vidcompress.py "/media/Movies"
+```
+
+Use H.264 in MKV and keep originals:
+```bash
+python vidcompress.py "/media/Movies" --video-codec h.264 --container mkv --keep-original
+```
+
+Use VP9 in MKV and send a notification to ntfy:
+```bash
+python vidcompress.py "/media/Movies" --video-codec vp9 --container mkv \
+  --notify-url http://ntfy.local:1030/vidcompress --notify-title "Library Compress"
+```
+
+Disable notifications explicitly:
+```bash
+python vidcompress.py "/media/Movies" --notify-url ''
+```
+
+## Notes for Users
+
+- Audio track selection prefers Japanese, then English, then Vietnamese; otherwise the first audio track.
+- If codecs already match but only the container differs, VidCompress performs a fast remux (no quality loss).
+- On macOS, if FFmpeg exposes `h264_videotoolbox`/`hevc_videotoolbox`, hardware encoding is used automatically.
+- Targeting MP4 ensures faststart optimization so playback can begin sooner when streaming.
+
+## Troubleshooting
+
+- FFmpeg/FFprobe not found: Ensure they are installed and available in your `PATH`.
+- Permission errors moving files: Run from a folder where you have write access.
+- `curl` not found (for notifications): Install `curl` or disable notifications with `--notify-url ''`.
 
 ## License
 
