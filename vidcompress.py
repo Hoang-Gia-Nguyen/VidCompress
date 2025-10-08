@@ -179,7 +179,7 @@ def is_videotoolbox_available(codec_type):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
-def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=None, web_optimize_mp4=None):
+def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=None, web_optimize_mp4=False):
     """
     Transcodes the input file to the desired format.
     """
@@ -193,20 +193,24 @@ def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=
     
     command = [get_ffmpeg_path(), '-i', input_path]
 
-    # Explicitly map the primary video and one audio stream
+    # Explicitly map the primary video, chosen audio, and all subtitle streams
     command += ['-map', '0:v:0']
     if audio_map_index is not None:
         command += ['-map', f'0:a:{audio_map_index}']
-    else:
-        command += ['-map', '0:a:0']
+    command += ['-map', '0:s?']
 
     # Set codecs
     command += ['-c:v', ffmpeg_video_codec]
-    # Always standardize audio to AAC stereo
-    command += ['-c:a', 'aac', '-ac', '2']
-    # Web optimize MP4 if requested or when output is MP4 by default
-    if web_optimize_mp4 is None:
-        web_optimize_mp4 = output_path.lower().endswith('.mp4')
+    if 'videotoolbox' in ffmpeg_video_codec:
+        command += ['-q:v', '65', '-b:v', '3M']
+    if audio_map_index is not None:
+        command += ['-c:a', 'aac', '-ac', '2']
+    # For subtitles, copy them to keep them, converting to a compatible format for mp4
+    if '.mp4' in output_path:
+        command += ['-c:s', 'mov_text']
+    else:
+        command += ['-c:s', 'copy']
+    # Web optimize MP4 if requested
     if web_optimize_mp4:
         command += ['-movflags', '+faststart']
     command += ['-y', output_path]
@@ -221,24 +225,26 @@ def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=
     return process.returncode == 0
 
 
-def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=None):
+def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=False):
     """
     Remuxes the input file to a new container without re-encoding.
     """
     command = [get_ffmpeg_path(), '-i', input_path]
 
-    # Explicitly map the primary video and one audio stream
+    # Explicitly map the primary video, chosen audio, and all subtitle streams
     command += ['-map', '0:v:0']
     if audio_map_index is not None:
         command += ['-map', f'0:a:{audio_map_index}']
-    else:
-        command += ['-map', '0:a:0']
+    command += ['-map', '0:s?']
 
-    # Copy streams as-is
-    command += ['-c', 'copy']
-    # Web optimize MP4 if requested or when output is MP4 by default
-    if web_optimize_mp4 is None:
-        web_optimize_mp4 = output_path.lower().endswith('.mp4')
+    # Copy streams, but convert subtitles for MP4
+    command += ['-c:v', 'copy']
+    command += ['-c:a', 'copy']
+    if '.mp4' in output_path:
+        command += ['-c:s', 'mov_text']
+    else:
+        command += ['-c:s', 'copy']
+    # Web optimize MP4 if requested
     if web_optimize_mp4:
         command += ['-movflags', '+faststart']
     command += ['-y', output_path]
@@ -253,65 +259,65 @@ def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=N
     return process.returncode == 0
 
 
-def extract_subtitles(input_path, output_dir):
+def extract_subtitles(file_path, output_dir):
     """
-    Extracts all subtitle streams from a video file into separate SRT files.
+    Extracts all subtitle streams from a video file and saves them as SRT files.
+    The SRT files are named based on the video filename and a 2-letter language code.
     """
-    media_info = get_media_info(input_path)
+    media_info = get_media_info(file_path)
     if not media_info:
-        print(f"Failed to get media info for {input_path}. Skipping subtitle extraction.", file=sys.stderr)
         return
 
     subtitle_streams = [s for s in media_info.get('streams', []) if s.get('codec_type') == 'subtitle']
-
     if not subtitle_streams:
-        dprint(f"[DEBUG] No subtitle streams found in {input_path}")
         return
 
-    os.makedirs(output_dir, exist_ok=True)
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
 
-    for stream in subtitle_streams:
-        stream_index = stream['index']
-        lang_tags = stream.get('tags', {})
-        language = lang_tags.get('language', 'und') # Default to 'und' (undefined) if no language tag
+    # ISO 639-2 to 639-1 mapping for common languages
+    lang_map = {
+        'eng': 'en', 'ara': 'ar', 'ger': 'de', 'spa': 'es', 'fre': 'fr',
+        'ita': 'it', 'por': 'pt', 'rus': 'ru', 'jpn': 'ja', 'kor': 'ko',
+        'chi': 'zh', 'hin': 'hi', 'dut': 'nl', 'swe': 'sv', 'nor': 'no',
+        'dan': 'da', 'fin': 'fi', 'pol': 'pl', 'tur': 'tr', 'heb': 'he',
+        'gre': 'el', 'vie': 'vi'
+    }
+
+    for i, stream in enumerate(subtitle_streams):
+        original_lang_code = stream.get('tags', {}).get('language', f'sub{i}')
         
-        # Construct output filename
-        base_name = os.path.splitext(os.path.basename(input_path))[0]
-        output_filename = f"{base_name}.{language}.srt"
-        output_path = os.path.join(output_dir, output_filename)
+        # Use the 2-letter code if available, otherwise fallback to the original
+        lang_code = lang_map.get(original_lang_code.lower(), original_lang_code)
 
-        if os.path.exists(output_path):
-            dprint(f"[DEBUG] Subtitle file {output_path} already exists and will be overwritten.")
-
-        # Check if the subtitle is text-based
-        codec_name = stream.get('codec_name')
-        if codec_name not in ['subrip', 'ass', 'ssa', 'mov_text', 'webvtt']:
-            print(f"Skipping non-text subtitle stream {stream_index} ({codec_name}) in {input_path}", file=sys.stderr)
-            continue
-
-        print(f"Extracting subtitle stream {stream_index} to {output_path}...")
+        output_path = os.path.join(output_dir, f"{base_name}.{lang_code}.srt")
         
         command = [
             get_ffmpeg_path(),
-            '-i', input_path,
-            '-map', f'0:{stream_index}',
+            '-i', file_path,
+            '-map', f'0:s:{i}',
             '-c:s', 'srt',
             '-y', output_path
         ]
         
         try:
             subprocess.run(command, check=True, capture_output=True, text=True)
-            print(f"Successfully extracted subtitle stream {stream_index} to {output_path}")
+            print(f"Extracted subtitle: {output_path}")
         except subprocess.CalledProcessError as e:
-            print(f"Failed to extract subtitle stream {stream_index} from {input_path}: {e.stderr}", file=sys.stderr)
+            print(f"Error extracting subtitle for stream {i}: {e.stderr}", file=sys.stderr)
+            sys.stderr.flush()
 
 
-def main(folder_path, keep_original, video_codec_choice, container_choice, notify_url=None, notify_title=None, extract_subtitles_flag=True):
+
+
+def main(folder_path, keep_original, video_codec_choice, container_choice, notify_url=None, notify_title=None, extract_subtitles_only=False):
     """
     Scans the folder for media files and converts them if necessary.
     """
-    print(f"Selected video codec: {video_codec_choice}")
-    print(f"Selected container: {container_choice}")
+    if extract_subtitles_only:
+        print("Mode: Extract subtitles only.")
+    else:
+        print(f"Selected video codec: {video_codec_choice}")
+        print(f"Selected container: {container_choice}")
 
     VIDEO_EXTENSIONS = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m2ts']
 
@@ -321,14 +327,20 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
     total_transcoded = 0
     total_remuxed = 0
     total_errors = 0
+    total_subtitle_extractions = 0
     for root, _, files in os.walk(folder_path):
         for file in files:
             if not any(file.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
                 continue
 
             input_path = os.path.join(root, file)
-            if extract_subtitles_flag:
-                extract_subtitles(input_path, root)
+
+            if extract_subtitles_only:
+                print(f"Extracting subtitles from {input_path}...")
+                target_dir = os.path.dirname(input_path)
+                extract_subtitles(input_path, target_dir)
+                total_subtitle_extractions += 1
+                continue
 
             total_processed += 1
             dprint(f"[DEBUG] Processing file: {input_path}")
@@ -339,6 +351,9 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 sys.stderr.flush()
                 total_errors += 1
                 continue
+            
+            # Extract subtitles from the original file before any processing
+            extract_subtitles(input_path, os.path.dirname(input_path))
 
             video_stream = next((stream for stream in media_info.get('streams', []) if stream.get('codec_type') == 'video'), None)
             
@@ -423,7 +438,9 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 success = transcode_file(
                     input_path,
                     temp_output_path,
-                    video_codec_choice
+                    video_codec_choice,
+                    preferred_audio_index,
+                    web_optimize_mp4=(container_choice == 'mp4')
                 )
             elif needs_remuxing: # Only remuxing is needed
                 action_type = "remuxed"
@@ -431,7 +448,9 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 dprint(f"[DEBUG] temp_output_path for remux: {temp_output_path}")
                 success = remux_file(
                     input_path,
-                    temp_output_path
+                    temp_output_path,
+                    preferred_audio_index,
+                    web_optimize_mp4=(container_choice == 'mp4')
                 )
             else:
                 # This case should ideally not be reached if the above logic is correct
@@ -477,8 +496,6 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                         total_remuxed += 1
                     dprint(f"[DEBUG] os.path.exists(final_path) after move: {os.path.exists(final_path)}")
 
-                    
-
                 except Exception as e:
                     print(f'Error during file operation: {e}', file=sys.stderr)
                     sys.stderr.flush()
@@ -503,14 +520,21 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
 
     # After processing all files, output summary and optionally notify
     hostname = socket.gethostname()
-    summary_lines = [
-        f"Folder: {folder_path}",
-        f"Video codec: {video_codec_choice}",
-        f"Container: {container_choice}",
-        f"Skipped: {total_skipped}",
-        f"Transcoded: {total_transcoded}",
-        f"Remuxed: {total_remuxed}",
-    ]
+    if extract_subtitles_only:
+        summary_lines = [
+            f"Folder: {folder_path}",
+            f"Operation: Extract Subtitles Only",
+            f"Files processed for subtitles: {total_subtitle_extractions}",
+        ]
+    else:
+        summary_lines = [
+            f"Folder: {folder_path}",
+            f"Video codec: {video_codec_choice}",
+            f"Container: {container_choice}",
+            f"Skipped: {total_skipped}",
+            f"Transcoded: {total_transcoded}",
+            f"Remuxed: {total_remuxed}",
+        ]
     summary = "\n".join(summary_lines)
     print("Summary:\n" + summary)
 
@@ -534,8 +558,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', help='Enable verbose debug output.')
     parser.add_argument('--notify-url', type=str, default='http://localhost:1030/vidcompress', help='ntfy target URL, e.g., http://localhost:1030/vidcompress')
     parser.add_argument('--notify-title', type=str, default='VidCompress', help='Notification title for ntfy')
-    parser.add_argument('--no-extract-subtitles', action='store_false', dest='extract_subtitles', help='Disable subtitle extraction.')
-    parser.set_defaults(extract_subtitles=True)
+    parser.add_argument('--extract-subtitles-only', action='store_true', help='Only extract subtitles without any transcoding or remuxing.')
     
     args = parser.parse_args()
     
@@ -555,5 +578,5 @@ if __name__ == '__main__':
         args.container,
         notify_url=args.notify_url,
         notify_title=args.notify_title,
-        extract_subtitles_flag=args.extract_subtitles
+        extract_subtitles_only=args.extract_subtitles_only
     )
