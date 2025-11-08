@@ -7,6 +7,7 @@ import json
 import argparse
 import socket
 import shutil
+import zipfile
 
 # Global debug flag
 DEBUG = False
@@ -202,6 +203,8 @@ def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=
 
     # Set codecs
     command += ['-c:v', ffmpeg_video_codec]
+    if 'videotoolbox' in ffmpeg_video_codec:
+        command += ['-b:v', '8000k']
     # Always standardize audio to AAC stereo
     command += ['-c:a', 'aac', '-ac', '2']
     # Web optimize MP4 if requested or when output is MP4 by default
@@ -253,11 +256,12 @@ def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=N
     return process.returncode == 0
 
 
-def extract_subtitles(input_path, output_dir):
+def extract_subtitles(input_path, output_dir, media_info=None):
     """
     Extracts all subtitle streams from a video file into separate SRT files.
     """
-    media_info = get_media_info(input_path)
+    if media_info is None:
+        media_info = get_media_info(input_path)
     if not media_info:
         print(f"Failed to get media info for {input_path}. Skipping subtitle extraction.", file=sys.stderr)
         return
@@ -327,12 +331,10 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 continue
 
             input_path = os.path.join(root, file)
-            if extract_subtitles_flag:
-                extract_subtitles(input_path, root)
-
-            total_processed += 1
-            dprint(f"[DEBUG] Processing file: {input_path}")
             media_info = get_media_info(input_path)
+
+            if extract_subtitles_flag:
+                extract_subtitles(input_path, root, media_info)
 
             if not media_info:
                 print(f"Failed to get media info for {input_path}. Skipping.", file=sys.stderr)
@@ -458,15 +460,20 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
 
                     # Handle existing original file if not keeping original
                     if not keep_original and os.path.exists(input_path) and input_path != final_path:
+                        zip_path = f"{input_path}.zip"
                         try:
-                            dprint(f"[DEBUG] Attempting to remove original file: {input_path}")
+                            dprint(f"[DEBUG] Zipping original file to: {zip_path}")
+                            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                                zipf.write(input_path, os.path.basename(input_path))
+                            
+                            dprint(f"[DEBUG] Removing original file after zipping: {input_path}")
                             os.remove(input_path)
                             time.sleep(0.1)
                             dprint(f"[DEBUG] Removed original file: {input_path}")
-                        except OSError as e:
-                            print(f"Error removing original file {input_path}: {e}", file=sys.stderr)
+                        except (OSError, zipfile.BadZipFile) as e:
+                            print(f"Error zipping or removing original file {input_path}: {e}", file=sys.stderr)
                             sys.stderr.flush()
-                            continue # Skip to next file if we can't remove original
+                            continue
 
                     shutil.move(temp_output_path, final_path)
                     time.sleep(0.1)
