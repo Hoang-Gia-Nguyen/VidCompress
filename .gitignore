@@ -17,4 +17,5 @@ GEMINI.md
 test_output/
 testoutput/
 allure-results/
-TEST_STRATEGY.md
+TEST_STRATEGY.mdtest_folder/
+test_input/
