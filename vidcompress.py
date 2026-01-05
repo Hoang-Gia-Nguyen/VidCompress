@@ -8,6 +8,8 @@ import argparse
 import socket
 import shutil
 import zipfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Global debug flag
 DEBUG = False
@@ -92,6 +94,37 @@ def get_preferred_audio_index(media_info):
 
     # Fallback: first audio
     return 0
+
+def get_video_resolution(media_info):
+    """
+    Returns the video resolution (height) from media info.
+    Returns 0 if video stream not found.
+    """
+    streams = media_info.get('streams', [])
+    video_stream = next((s for s in streams if s.get('codec_type') == 'video'), None)
+    if video_stream:
+        return video_stream.get('height', 0)
+    return 0
+
+def get_bitrate_for_resolution(resolution, custom_bitrate=None):
+    """
+    Returns recommended bitrate in kbps based on video resolution.
+    If custom_bitrate is provided, returns that instead.
+    """
+    if custom_bitrate:
+        return custom_bitrate
+    
+    # Bitrate recommendations for H.265
+    if resolution >= 2160:  # 4K
+        return 12000
+    elif resolution >= 1440:  # 2K
+        return 8000
+    elif resolution >= 1080:  # 1080p
+        return 6000
+    elif resolution >= 720:   # 720p
+        return 4000
+    else:  # SD
+        return 2500
 
 def is_mp4_faststart(file_path):
     """
@@ -180,7 +213,7 @@ def is_videotoolbox_available(codec_type):
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
-def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=None, web_optimize_mp4=None):
+def transcode_file(input_path, output_path, video_codec_choice, bitrate=None, preset='medium', audio_map_index=None, web_optimize_mp4=None, media_info=None):
     """
     Transcodes the input file to the desired format.
     """
@@ -192,21 +225,40 @@ def transcode_file(input_path, output_path, video_codec_choice, audio_map_index=
     elif video_codec_choice == 'vp9':
         ffmpeg_video_codec = 'libvpx-vp9'
     
-    command = [get_ffmpeg_path(), '-i', input_path]
+    command = [get_ffmpeg_path()]
+    
+    # Hardware-accelerated decoding
+    command += ['-hwaccel', 'videotoolbox']
+    command += ['-thread_queue_size', '512']
+    command += ['-i', input_path]
 
-    # Explicitly map the primary video and one audio stream
+    # Map the primary video and all audio streams
     command += ['-map', '0:v:0']
-    if audio_map_index is not None:
-        command += ['-map', f'0:a:{audio_map_index}']
-    else:
-        command += ['-map', '0:a:0']
+    command += ['-map', '0:a']
+    
+    # Map all subtitle streams
+    command += ['-map', '0:s?']
 
     # Set codecs
     command += ['-c:v', ffmpeg_video_codec]
-    if 'videotoolbox' in ffmpeg_video_codec:
-        command += ['-b:v', '8000k']
-    # Always standardize audio to AAC stereo
-    command += ['-c:a', 'aac', '-ac', '2']
+    
+    # Determine bitrate: use custom if provided, otherwise use resolution-based
+    if bitrate is None and media_info:
+        resolution = get_video_resolution(media_info)
+        bitrate = get_bitrate_for_resolution(resolution)
+    elif bitrate is None:
+        bitrate = 6000  # Default fallback
+    
+    command += ['-b:v', f'{bitrate}k']
+    
+    # Add preset for software encoders
+    if 'videotoolbox' not in ffmpeg_video_codec and preset:
+        command += ['-preset', preset]
+    
+    # Copy audio streams as-is
+    command += ['-c:a', 'copy']
+    # Copy subtitle streams as-is
+    command += ['-c:s', 'copy']
     # Web optimize MP4 if requested or when output is MP4 by default
     if web_optimize_mp4 is None:
         web_optimize_mp4 = output_path.lower().endswith('.mp4')
@@ -230,12 +282,12 @@ def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=N
     """
     command = [get_ffmpeg_path(), '-i', input_path]
 
-    # Explicitly map the primary video and one audio stream
+    # Map the primary video and all audio streams
     command += ['-map', '0:v:0']
-    if audio_map_index is not None:
-        command += ['-map', f'0:a:{audio_map_index}']
-    else:
-        command += ['-map', '0:a:0']
+    command += ['-map', '0:a']
+    
+    # Map all subtitle streams
+    command += ['-map', '0:s?']
 
     # Copy streams as-is
     command += ['-c', 'copy']
@@ -258,64 +310,23 @@ def remux_file(input_path, output_path, audio_map_index=None, web_optimize_mp4=N
 
 def extract_subtitles(input_path, output_dir, media_info=None):
     """
-    Extracts all subtitle streams from a video file into separate SRT files.
+    No longer extracts subtitles - they are now embedded in the output file.
+    This function is kept for backward compatibility.
     """
-    if media_info is None:
-        media_info = get_media_info(input_path)
-    if not media_info:
-        print(f"Failed to get media info for {input_path}. Skipping subtitle extraction.", file=sys.stderr)
-        return
-
-    subtitle_streams = [s for s in media_info.get('streams', []) if s.get('codec_type') == 'subtitle']
-
-    if not subtitle_streams:
-        dprint(f"[DEBUG] No subtitle streams found in {input_path}")
-        return
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    for stream in subtitle_streams:
-        stream_index = stream['index']
-        lang_tags = stream.get('tags', {})
-        language = lang_tags.get('language', 'und') # Default to 'und' (undefined) if no language tag
-        
-        # Construct output filename
-        base_name = os.path.splitext(os.path.basename(input_path))[0]
-        output_filename = f"{base_name}.{language}.srt"
-        output_path = os.path.join(output_dir, output_filename)
-
-        if os.path.exists(output_path):
-            dprint(f"[DEBUG] Subtitle file {output_path} already exists and will be overwritten.")
-
-        # Check if the subtitle is text-based
-        codec_name = stream.get('codec_name')
-        if codec_name not in ['subrip', 'ass', 'ssa', 'mov_text', 'webvtt']:
-            print(f"Skipping non-text subtitle stream {stream_index} ({codec_name}) in {input_path}", file=sys.stderr)
-            continue
-
-        print(f"Extracting subtitle stream {stream_index} to {output_path}...")
-        
-        command = [
-            get_ffmpeg_path(),
-            '-i', input_path,
-            '-map', f'0:{stream_index}',
-            '-c:s', 'srt',
-            '-y', output_path
-        ]
-        
-        try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
-            print(f"Successfully extracted subtitle stream {stream_index} to {output_path}")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to extract subtitle stream {stream_index} from {input_path}: {e.stderr}", file=sys.stderr)
+    dprint(f"[DEBUG] Subtitle embedding is now handled during transcoding/remuxing, not as separate extraction.")
 
 
-def main(folder_path, keep_original, video_codec_choice, container_choice, notify_url=None, notify_title=None, extract_subtitles_flag=True):
+def main(folder_path, keep_original, video_codec_choice, container_choice, bitrate=None, preset='medium', max_workers=2, notify_url=None, notify_title=None, extract_subtitles_flag=True):
     """
     Scans the folder for media files and converts them if necessary.
+    Processes files sequentially to avoid overwhelming system resources.
     """
     print(f"Selected video codec: {video_codec_choice}")
     print(f"Selected container: {container_choice}")
+    if bitrate:
+        print(f"Selected bitrate: {bitrate}k")
+    print(f"Preset: {preset}")
+    print(f"Max parallel workers: {max_workers}")
 
     VIDEO_EXTENSIONS = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m2ts']
 
@@ -425,7 +436,10 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
                 success = transcode_file(
                     input_path,
                     temp_output_path,
-                    video_codec_choice
+                    video_codec_choice,
+                    bitrate=bitrate,
+                    preset=preset,
+                    media_info=media_info
                 )
             elif needs_remuxing: # Only remuxing is needed
                 action_type = "remuxed"
@@ -533,11 +547,15 @@ def main(folder_path, keep_original, video_codec_choice, container_choice, notif
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='VidCompress: Transcode video files to specified format.')
     parser.add_argument('folder_path', type=str, help='The path to the folder containing video files.')
-    parser.add_argument('--keep-original', action='store_true', help='Do not delete the original file after successful transcoding.')
+    parser.add_argument('--delete-original', action='store_true', help='Delete the original file after successful transcoding (default: keep original).')
     parser.add_argument('--video-codec', type=str, default='h.265', choices=['h.265', 'h.264', 'vp9'],
                         help='Video codec to use for transcoding (default: h.265).')
     parser.add_argument('--container', type=str, default='mp4', choices=['mkv', 'mp4'],
                         help='Container format for the output file (default: mp4).')
+    parser.add_argument('--bitrate', type=int, default=None, help='Video bitrate in kbps (e.g., 6000). Default: automatic based on resolution (4K:12000, 2K:8000, 1080p:6000, 720p:4000, SD:2500).')
+    parser.add_argument('--preset', type=str, default='medium', choices=['fast', 'medium', 'slow'],
+                        help='Encoding preset: fast (lower quality, faster), medium (balanced), slow (higher quality, slower). Only for software encoders. (default: medium)')
+    parser.add_argument('--max-workers', type=int, default=2, help='Maximum number of parallel transcoding workers (default: 2).')
     parser.add_argument('--debug', action='store_true', help='Enable verbose debug output.')
     parser.add_argument('--notify-url', type=str, default='http://localhost:1030/vidcompress', help='ntfy target URL, e.g., http://localhost:1030/vidcompress')
     parser.add_argument('--notify-title', type=str, default='VidCompress', help='Notification title for ntfy')
@@ -557,9 +575,12 @@ if __name__ == '__main__':
     
     main(
         args.folder_path,
-        args.keep_original,
+        not args.delete_original,
         args.video_codec,
         args.container,
+        bitrate=args.bitrate,
+        preset=args.preset,
+        max_workers=args.max_workers,
         notify_url=args.notify_url,
         notify_title=args.notify_title,
         extract_subtitles_flag=args.extract_subtitles
