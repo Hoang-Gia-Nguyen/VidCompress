@@ -50,7 +50,7 @@ jobs:
         retention-days: 7
 
     - name: Generate Allure Report (Ubuntu)
-      uses: simple-elf/allure-report-action@v1.9
+      uses: simple-elf/allure-report-action@v1.13
       if: always()
       id: allure-report-ubuntu
       with:
@@ -115,7 +115,7 @@ jobs:
         retention-days: 7
 
     - name: Generate Allure Report (Windows)
-      uses: simple-elf/allure-report-action@v1.9
+      uses: simple-elf/allure-report-action@v1.13
       if: always()
       id: allure-report-windows
       with:
