@@ -1,15 +1,19 @@
 # VidCompress
 
-VidCompress scans a folder and standardizes your video files for reliable playback and smaller size. It transcodes when needed, remuxes when possible, picks the preferred audio track, and can send a completion notification.
+VidCompress scans a folder and standardizes your video files for reliable playback and smaller size. It transcodes when needed, remuxes when possible, preserves all audio and subtitle tracks, and can send a completion notification.
 
 ## What You Get
 
 - Flexible video codecs: H.265 (HEVC), H.264, or VP9
 - Output containers: MP4 or MKV
 - Smart remux: copy streams when codecs already match
-- Standardized audio: AAC stereo (2 channels)
+- Multi-audio preservation: keeps all audio tracks from source file
+- Multi-subtitle preservation: keeps all subtitle tracks from source file
+- Intelligent bitrate selection: automatically optimized based on resolution (4K→12Mbps, 1080p→6Mbps, etc.)
+- Encoding presets: fast/medium/slow for quality/speed trade-off
 - MP4 faststart: web‑optimized MP4 when targeting MP4
 - macOS hardware acceleration: uses VideoToolbox if available
+- Hardware-accelerated decoding: faster processing on Apple Silicon
 
 ## Requirements
 
@@ -47,7 +51,9 @@ python vidcompress.py "/path/to/your/video/folder"
 Defaults:
 - `--video-codec`: `h.265`
 - `--container`: `mp4`
-- Original files are deleted after a successful process unless `--keep-original` is set
+- `--bitrate`: automatic (based on resolution)
+- `--preset`: `medium`
+- Original files are **kept by default** unless `--delete-original` is set
 - Notifications: by default sends to `http://localhost:1030/vidcompress` if reachable
 
 ## Command Line Options
@@ -56,7 +62,10 @@ Defaults:
 python vidcompress.py FOLDER \
   [--video-codec {h.265,h.264,vp9}] \
   [--container {mkv,mp4}] \
-  [--keep-original] \
+  [--bitrate BITRATE] \
+  [--preset {fast,medium,slow}] \
+  [--max-workers NUM] \
+  [--delete-original] \
   [--notify-url URL] \
   [--notify-title TITLE] \
   [--debug]
@@ -65,7 +74,18 @@ python vidcompress.py FOLDER \
 - `FOLDER`: Path to the folder to process (recurses into subfolders).
 - `--video-codec`: Target video codec. Chooses VideoToolbox on macOS when available.
 - `--container`: Target container (`mp4` or `mkv`). When `mp4` and codecs already match, VidCompress ensures MP4 is faststart‑optimized.
-- `--keep-original`: Keep the original file after a successful transcode/remux.
+- `--bitrate`: Video bitrate in kbps (e.g., `6000`). Default: automatic based on resolution:
+  - 4K (2160p+): 12000 kbps
+  - 2K (1440p+): 8000 kbps
+  - 1080p: 6000 kbps (recommended for imperceptible quality loss)
+  - 720p: 4000 kbps
+  - SD (<720p): 2500 kbps
+- `--preset`: Encoding preset for software encoders. Only applies to software-based codecs (not VideoToolbox):
+  - `fast`: Lower quality, faster encoding (~30-40% faster)
+  - `medium`: Balanced quality and speed (default)
+  - `slow`: Higher quality, slower encoding (~30-40% slower)
+- `--max-workers`: Maximum parallel transcoding workers (default: 2). Structure ready for future parallel processing.
+- `--delete-original`: Delete the original file after successful transcode/remux. Default behavior keeps originals.
 - `--notify-url`: ntfy endpoint, e.g. `http://localhost:1030/vidcompress`. To disable notifications, pass an empty value: `--notify-url ''`.
 - `--notify-title`: Notification title (default: `VidCompress`).
 - `--debug`: Verbose debug output to stdout.
@@ -76,19 +96,24 @@ Environment variables (optional):
 
 ## Examples
 
-Transcode to H.265 in MP4, deleting originals (default):
+Transcode to H.265 in MP4 with default 1080p bitrate (6Mbps), keeping originals:
 ```bash
 python vidcompress.py "/media/Movies"
 ```
 
-Use H.264 in MKV and keep originals:
+Use H.264 in MKV with custom bitrate and delete originals:
 ```bash
-python vidcompress.py "/media/Movies" --video-codec h.264 --container mkv --keep-original
+python vidcompress.py "/media/Movies" --video-codec h.264 --container mkv --bitrate 5000 --delete-original
 ```
 
-Use VP9 in MKV and send a notification to ntfy:
+Use VP9 in MKV with fast encoding preset:
 ```bash
-python vidcompress.py "/media/Movies" --video-codec vp9 --container mkv \
+python vidcompress.py "/media/Movies" --video-codec vp9 --container mkv --preset fast
+```
+
+Transcode with custom bitrate and notification:
+```bash
+python vidcompress.py "/media/Movies" --bitrate 4000 \
   --notify-url http://ntfy.local:1030/vidcompress --notify-title "Library Compress"
 ```
 
@@ -97,12 +122,23 @@ Disable notifications explicitly:
 python vidcompress.py "/media/Movies" --notify-url ''
 ```
 
+Use slow preset for higher quality (slower transcoding):
+```bash
+python vidcompress.py "/media/Movies" --preset slow --delete-original
+```
+
 ## Notes for Users
 
-- Audio track selection prefers Japanese, then English, then Vietnamese; otherwise the first audio track.
-- If codecs already match but only the container differs, VidCompress performs a fast remux (no quality loss).
-- On macOS, if FFmpeg exposes `h264_videotoolbox`/`hevc_videotoolbox`, hardware encoding is used automatically.
-- Targeting MP4 ensures faststart optimization so playback can begin sooner when streaming.
+- **All audio tracks preserved**: All audio streams from the source file are included in the output (not just the preferred one).
+- **All subtitles preserved**: All subtitle streams from the source file are embedded in the output file (no separate SRT extraction).
+- **Automatic bitrate selection**: When not specified, bitrate is chosen based on video resolution for optimal quality/size balance.
+- **Audio/subtitle copy**: Audio and subtitle streams are copied as-is without re-encoding, preserving their original quality and format.
+- **Language preferences**: While all audio tracks are preserved, the system still prefers Japanese, then English, then Vietnamese for metadata purposes (legacy functionality).
+- **If codecs already match but only the container differs**, VidCompress performs a fast remux (no quality loss).
+- **On macOS**, if FFmpeg exposes `h264_videotoolbox`/`hevc_videotoolbox`, hardware encoding is used automatically.
+- **Hardware acceleration**: Supports GPU-accelerated decoding via VideoToolbox on Apple Silicon for faster processing (~220 fps on M4).
+- **Targeting MP4** ensures faststart optimization so playback can begin sooner when streaming.
+- **Preset only applies to software encoders** (libx265, libx264, libvpx-vp9); hardware encoders (VideoToolbox) ignore the preset parameter.
 
 ## Troubleshooting
 
