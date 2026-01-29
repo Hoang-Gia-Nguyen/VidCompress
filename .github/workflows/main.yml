@@ -1,4 +1,4 @@
-name: Python CI
+name: Unit test CT
 
 on:
   workflow_dispatch:
