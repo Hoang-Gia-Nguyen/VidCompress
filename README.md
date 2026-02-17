@@ -5,7 +5,7 @@ The previous documentation is outdated and has been removed.
 
 ### Current Status:
 - [x] Core logic refactor
-- [ ] Misc functions
+- [x] Misc functions
 - [ ] Hardcode -> Arguments
 - [ ] New documentation
 
