@@ -36,8 +36,11 @@ def test_check_ffmpeg_availability(mock_returncode, expected_result):
     
     # Scenario 2: VideoToolbox is listed and PASSES hardware check.
     ("V..... hevc_nvenc\nV..... hevc_videotoolbox", {"hevc_videotoolbox": True, "hevc_nvenc": True}, "hevc_videotoolbox"),
+
+    # Scenario 3: VideoToolbox is listed and PASSES hardware check.
+    ("V..... hevc_nvenc\nV..... hevc_qsv", {"hevc_qsv": True, "hevc_nvenc": True}, "hevc_videotoolbox"),
     
-    # Scenario 3: Nothing found in list. Fallback to libx265 (if your code handles that).
+    # Scenario 4: Nothing found in list. Fallback to libx265 (if your code handles that).
     ("empty", {}, "libx265"),
 ])
 @patch("app.transcoder.is_encoder_functional")
