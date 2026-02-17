@@ -34,7 +34,7 @@ pipeline {
     post {
         always {
             // This plugin renders the 'Test Result' tab in Jenkins
-            junit 'results.xml'
+            junit testResults:'results.xml', skipPublishChecks: true
             
             // Optional: Store the pretty HTML report as an artifact
             archiveArtifacts artifacts: 'report.html', fingerprint: true
