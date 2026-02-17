@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from app.transcoder import extract_subtitles, get_video_info, process_video, get_best_hevc_encoder, check_ffmpeg_availability, ProcessStatus
+from app.transcoder import extract_subtitles, get_video_info, process_video, get_best_hevc_encoder, check_ffmpeg_availability, is_encoder_functional, ProcessStatus
 from unittest.mock import patch, MagicMock
 
 @pytest.mark.parametrize("mock_returncode, expected_result", [
@@ -30,26 +30,34 @@ def test_check_ffmpeg_availability(mock_returncode, expected_result):
         assert availability_info["ffprobe"]["available"] is expected_result
         assert mocked_run.call_count == 2
 
-@pytest.mark.parametrize("mock_output, expected_hevc_encoder", [
-    ('hevc_nvenc hevc_videotoolbox', 'hevc_videotoolbox'),
-    ('hevc_qsv hevc_nvenc', 'hevc_nvenc'),
-    ('hevc_amf hevc_qsv', 'hevc_amf'),
-    ('na na na', 'libx265')
+@pytest.mark.parametrize("mock_list, functional_map, expected_result", [
+    # Scenario 1: NVENC is listed, but fails hardware check. Fallback to libx265.
+    ("V..... hevc_nvenc\nV..... libx265", {"hevc_nvenc": False, "libx265": True}, "libx265"),
+    
+    # Scenario 2: VideoToolbox is listed and PASSES hardware check.
+    ("V..... hevc_nvenc\nV..... hevc_videotoolbox", {"hevc_videotoolbox": True, "hevc_nvenc": True}, "hevc_videotoolbox"),
+    
+    # Scenario 3: Nothing found in list. Fallback to libx265 (if your code handles that).
+    ("empty", {}, "libx265"),
 ])
-def get_best_hevc_encoder(mock_output, expected_hevc_encoder):
+@patch("app.transcoder.is_encoder_functional")
+@patch("subprocess.run")
+def test_get_best_hevc_encoder_logic(mock_run, mock_is_functional, mock_list, functional_map, expected_result):
+    # 1. Setup the -encoders mock
     mock_proc = MagicMock()
-    mock_proc.stdout = mock_output
+    mock_proc.stdout = mock_list
     mock_proc.returncode = 0
+    mock_run.return_value = mock_proc
 
-    with patch("subprocess.run", return_value=mock_proc) as mocked_run:
-        hevc_encoder = get_best_hevc_encoder
-        assert hevc_encoder == expected_hevc_encoder
-        mocked_run.assert_called_once_with(
-            ['ffmpeg', '-encoders'], 
-            capture_output=True, 
-            text=True, 
-            check=True
-        )
+    # 2. Setup the functional check stub
+    # This logic looks at the encoder name and returns the True/False value from our map
+    mock_is_functional.side_effect = lambda x: functional_map.get(x, True)
+
+    # 3. Execute
+    result = get_best_hevc_encoder()
+
+    # 4. Assert
+    assert result == expected_result
 
 @pytest.mark.parametrize("path, needs_transcoding, video_codec, audio_codec", [
     ("tests/videos_temp/test_need_transcode.mkv", True, "h264", ["eac3"]), # need transcode

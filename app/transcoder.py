@@ -34,6 +34,23 @@ def check_ffmpeg_availability():
 
     return results
 
+def is_encoder_functional(encoder_name):
+    """Checks if a specific FFmpeg encoder can actually run."""
+    cmd = [
+        'ffmpeg', '-y', 
+        '-f', 'lavfi', '-i', 'color=c=black:s=640x480', # Tiny fake input
+        '-t', '0.5',                                   # Only 0.5 seconds
+        '-c:v', encoder_name, 
+        '-f', 'null', '-'                              # Output to nowhere
+    ]
+    
+    try:
+        # Run command, capturing output to keep logs clean
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        return result.returncode == 0
+    except Exception:
+        return False
+
 def get_best_hevc_encoder():
     """
     Detects the best available HEVC encoder based on hardware availability.
@@ -64,13 +81,13 @@ def get_best_hevc_encoder():
         for encoder in hardware_encoders:
             # Look for the encoder name in the output (ensuring it's a video encoder 'V')
             if re.search(rf'V.....\s+{encoder}', output):
-                return encoder
+                if is_encoder_functional(encoder):
+                    return encoder
+                else:
+                    continue
 
         # Fallback to software (CPU) if no hardware encoder found
-        if 'libx265' in output:
-            return 'libx265'
-        
-        return None
+        return 'libx265'
 
     except subprocess.CalledProcessError:
         return "Error: FFmpeg not found or failed to run."
