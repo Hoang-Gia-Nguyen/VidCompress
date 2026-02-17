@@ -4,10 +4,14 @@ pipeline {
             image 'hgnguyen37/python-ffmpeg:3.12-slim' // Using the custom python:3.12 with ffmpeg
         }
     }
+
+    triggers {
+        githubPush()
+    }
     
     // This ensures the pipeline only triggers/runs for your specific branch
     stages {
-        stage('Checkout') {
+        stage('Checkout docker images') {
             when {
                 branch 'refactor/simplize'
             }
