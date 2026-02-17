@@ -1,5 +1,7 @@
 import subprocess
 import json
+import re
+import shutil
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict
@@ -9,6 +11,69 @@ class ProcessStatus(Enum):
     SKIPPED = 2
     FILE_NOT_FOUND = 3
     ERROR = 4
+
+def check_ffmpeg_availability():
+    """
+    Checks if ffmpeg and ffprobe are installed and accessible in the system PATH.
+    Returns a dictionary with the status and paths.
+    """
+    tools = ["ffmpeg", "ffprobe"]
+    results = {}
+
+    for tool in tools:
+        path = shutil.which(tool)
+        if path:
+            # Optionally verify by running --version to ensure it's not a dummy file
+            try:
+                subprocess.run([tool, "-version"], capture_output=True, text=True, check=True)
+                results[tool] = {"available": True, "path": path}
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                results[tool] = {"available": False, "path": None}
+        else:
+            results[tool] = {"available": False, "path": None}
+
+    return results
+
+def get_best_hevc_encoder():
+    """
+    Detects the best available HEVC encoder based on hardware availability.
+    Priority: VideoToolbox (Mac) > NVENC (NVIDIA) > QSV (Intel) > libx265 (CPU)
+    """
+    try:
+        # Get list of all encoders supported by the installed FFmpeg
+        result = subprocess.run(
+            ['ffmpeg', '-encoders'], 
+            capture_output=True, 
+            text=True, 
+            check=True
+        )
+        output = result.stdout
+
+        # Define priority list for HEVC hardware encoders
+        # hevc_videotoolbox: macOS (Apple Silicon / Intel Mac)
+        # hevc_nvenc: NVIDIA GPUs
+        # hevc_qsv: Intel Quick Sync
+        # hevc_amf: AMD GPUs
+        hardware_encoders = [
+            'hevc_videotoolbox', 
+            'hevc_nvenc', 
+            'hevc_qsv', 
+            'hevc_amf'
+        ]
+
+        for encoder in hardware_encoders:
+            # Look for the encoder name in the output (ensuring it's a video encoder 'V')
+            if re.search(rf'V.....\s+{encoder}', output):
+                return encoder
+
+        # Fallback to software (CPU) if no hardware encoder found
+        if 'libx265' in output:
+            return 'libx265'
+        
+        return None
+
+    except subprocess.CalledProcessError:
+        return "Error: FFmpeg not found or failed to run."
 
 def extract_subtitles(input_path: Path, output_dir: Path):
     """
@@ -143,8 +208,9 @@ def process_video(input_path: Path, output_path: Path = None):
         print(f"[~] Video is already H.265. Copying stream...")
         command += ['-c:v', 'copy']
     else:
-        print(f"[*] Transcoding video to H.265...")
-        command += ['-c:v', 'hevc_videotoolbox', '-crf', '23', '-preset', 'medium']
+        hevc_encoder = get_best_hevc_encoder()
+        print(f"[*] Transcoding video to H.265 using {hevc_encoder}...")
+        command += ['-c:v', hevc_encoder, '-crf', '23', '-preset', 'medium']
 
     # AUDIO LOGIC: Skip transcoding if already AAC
     if 'aac' in info["audio_codec"]:

@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'python:3.12-bookworm' // Using the stable Debian-based Python 3.12 image
+            image 'hgnguyen37hgnguyen37/python-ffmpeg:3.12-slim' // Using the custom python:3.12 with ffmpeg
         }
     }
     

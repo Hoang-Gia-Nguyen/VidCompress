@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from media_scanner import list_media_files, manage_backups
-from transcoder import get_video_info, extract_subtitles, process_video
+from transcoder import get_video_info, extract_subtitles, process_video, check_ffmpeg_availability
 
 MEDIA_DIR_SONARR = "/Volumes/MEDIA/sonarr"
 MEDIA_DIR_RADARR = "/Volumes/MEDIA/radarr"
@@ -9,6 +9,12 @@ ARCHIVE_DIR = "/Volumes/MEDIA/archive"
 VIDEO_EXTS = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv']
 
 def pipeline(media_dir):
+    tool_check = check_ffmpeg_availability()
+    ffmpeg_availability = tool_check['ffmpeg']['available']
+    ffprobe_availability = tool_check['ffprobe']['available']
+    if not (ffmpeg_availability and ffprobe_availability):
+        print("Pipeline interupted: ffmpeg and/or ffprobe is not available in this machine!!!")
+        return
     media_list = list_media_files(media_dir, VIDEO_EXTS)
     for file in media_list:
         file_obj = Path(file)
