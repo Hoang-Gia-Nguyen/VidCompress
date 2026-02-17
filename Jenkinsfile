@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'hgnguyen37hgnguyen37/python-ffmpeg:3.12-slim' // Using the custom python:3.12 with ffmpeg
+            image 'hgnguyen37/python-ffmpeg:3.12-slim' // Using the custom python:3.12 with ffmpeg
         }
     }
     
@@ -26,17 +26,18 @@ pipeline {
         stage('Run Tests') {
             steps {
                 // Setting PYTHONPATH to the current workspace and running pytest
-                sh 'PYTHONPATH=. pytest'
+                sh 'PYTHONPATH=. pytest --html=report.html --self-contained-html --junitxml=results.xml || true'
             }
         }
     }
     
     post {
         always {
-            echo 'Cleaning up workspace...'
-        }
-        failure {
-            echo 'Tests failed! Check the refactor logic.'
+            // This plugin renders the 'Test Result' tab in Jenkins
+            junit 'results.xml'
+            
+            // Optional: Store the pretty HTML report as an artifact
+            archiveArtifacts artifacts: 'report.html', fingerprint: true
         }
     }
 }
