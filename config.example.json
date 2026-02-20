@@ -1,0 +1,6 @@
+{
+    "MEDIA_DIRS": ["your_sonarr_dir", "your_radarr_dir"],
+    "BACKUP_DIR": "/Volumes/MEDIA/archive",
+    "EXTRACT_SUBTITLE": false,
+    "BACKUP_STRATEGY": "ARCHIVE"
+}

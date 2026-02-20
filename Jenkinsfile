@@ -30,7 +30,7 @@ pipeline {
         stage('Run Tests') {
             steps {
                 // Setting PYTHONPATH to the current workspace and running pytest
-                sh 'PYTHONPATH=. pytest -s --html=report.html --self-contained-html --junitxml=results.xml || true'
+                sh 'pytest -s --html=report.html --self-contained-html --junitxml=results.xml || true'
             }
         }
     }

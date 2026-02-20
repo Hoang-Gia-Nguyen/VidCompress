@@ -1,38 +1,28 @@
-from pathlib import Path
+import json
+from media_scanner import BackupStrategy
+from transcoder import FfmpegTranscoder
+from pipeline import Pipeline
 
-from media_scanner import list_media_files, manage_backups
-from transcoder import get_video_info, extract_subtitles, process_video, check_ffmpeg_availability
+with open('config.json') as f:
+    config = json.load(f)
 
-MEDIA_DIR_SONARR = "/Volumes/MEDIA/sonarr"
-MEDIA_DIR_RADARR = "/Volumes/MEDIA/radarr"
-ARCHIVE_DIR = "/Volumes/MEDIA/archive"
-VIDEO_EXTS = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv']
+MEDIA_DIRS = config['MEDIA_DIRS']
+BACKUP_DIR = config['BACKUP_DIR']
+EXTRACT_SUBTITLE = config['EXTRACT_SUBTITLE']
 
-def pipeline(media_dir):
-    tool_check = check_ffmpeg_availability()
-    ffmpeg_availability = tool_check['ffmpeg']['available']
-    ffprobe_availability = tool_check['ffprobe']['available']
-    if not (ffmpeg_availability and ffprobe_availability):
-        print("Pipeline interupted: ffmpeg and/or ffprobe is not available in this machine!!!")
-        return
-    media_list = list_media_files(media_dir, VIDEO_EXTS)
-    for file in media_list:
-        file_obj = Path(file)
-        folder_obj = Path(file.parent)
-        print('\n\n=========================')
-        print(f"Handling file: {file}")
-        print(f"\n* Extract subtitle from media file to srt:")
-        extract_subtitles(file_obj, folder_obj)
-        print(f"\n* Analyze if file need transcoding")
-        info = get_video_info(file_obj)
-        if info["needs_transcoding"] is False:
-            print(f"==> SKIP: Video codec and audio codec match expected format (hevc, aac)")
-            continue
-        else:
-            print(f"==> START TRANSCODING")
-            exit_code = process_video(file_obj)
-            print(f"==> TRANSCODING COMPLETED WITH EXIT CODE: {exit_code}")
-    manage_backups(MEDIA_DIR_SONARR, 'archive', ARCHIVE_DIR)
+try:
+    BACKUP_STRATEGY = BackupStrategy[config['BACKUP_STRATEGY']]
+except KeyError:
+    raise ValueError(f"Invalid backup strategy: '{config['BACKUP_STRATEGY']}'. Supported strategies: {[e.name for e in BackupStrategy]}. Please update 'config.json' with a valid backup strategy and restart the application.")
 
-if __name__ == '__main__':
-    pipeline(MEDIA_DIR_SONARR)
+transcoder = FfmpegTranscoder()
+
+pipeline = Pipeline(
+    transcoder=transcoder,
+    media_dirs=MEDIA_DIRS,
+    backup_strategy=BACKUP_STRATEGY,
+    backup_dir=BACKUP_DIR,
+    extract_subtitle=EXTRACT_SUBTITLE
+    )
+
+pipeline.run()
