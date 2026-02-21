@@ -1,9 +1,10 @@
+from app.media_scanner import MediaScanner
+from app.transcoder import Transcoder, ProcessStatus, BackupStrategy
+from app.jobrepo import JobRepository, Job
 from pathlib import Path
 
-from app.media_scanner import MediaScanner, BackupStrategy
-from app.transcoder import Transcoder
 
-class Pipeline():
+class Pipeline:
     """
     A class representing a media processing pipeline.
 
@@ -18,7 +19,18 @@ class Pipeline():
         backup_dir (str): The directory where backups are stored. Defaults to an empty string.
         dry_run (bool): A flag indicating whether to perform a dry run. Defaults to False.
     """
-    def __init__(self, transcoder: Transcoder, media_dirs: list, extract_subtitle: bool, backup_strategy: BackupStrategy, backup_dir: str = "", dry_run: bool = False):
+
+    def __init__(
+        self,
+        jobrepo: JobRepository,
+        scanner: MediaScanner,
+        transcoder: Transcoder,
+        media_dirs: list,
+        extract_subtitle: bool,
+        backup_strategy: BackupStrategy,
+        backup_dir: str = "",
+        dry_run: bool = False,
+    ):
         """
         Initializes a Pipeline object.
 
@@ -33,13 +45,15 @@ class Pipeline():
         Raises:
             None
         """
+        self.jobrepo = jobrepo
+        self.scanner = scanner
         self.transcoder = transcoder
         self.media_dirs = media_dirs
         self.backup_strategy = backup_strategy
         self.backup_dir = backup_dir
         self.extract_subtitle = extract_subtitle
-    
-    def run(self):
+
+    def scan(self):
         """
         Runs the media processing pipeline.
 
@@ -50,36 +64,96 @@ class Pipeline():
         Returns:
             None
         """
-        print("Start pipeline!!!")
-        for media_dir in self.media_dirs:
-            print(f"[Pipeline][DirHandling] Start working with {media_dir}")
-            try:
-                scanner = MediaScanner(media_dir)
-            except FileNotFoundError as e:
-                print(f"❌ [MediaScanner][ERROR]: Path does not exist {media_dir}")
-                continue
-            except NotADirectoryError as e:
-                print(f"❌ [MediaScanner][ERROR]: Path is not dir '{media_dir}'")
-                continue
-            except Exception as e:
-                print(f"⚠️  [MediaScanner][ERROR]: Unidentified: {e}")
-                continue
+        print("\n[PIPELINE] Start pipeline!!!")
+        for dir in self.media_dirs:
+            for file in self.scanner.iter_media_files(dir):
+                self.jobrepo.enqueue(file)
 
-            media_list = scanner.list_media_files()
-            for file in media_list:
-                folder = Path(file.parent)
-                print('\n\n=========================')
-                print(f"[Pipeline][FileHandling] Handling file: {file.name}")
-                if self.extract_subtitle:
-                    print(f"\n* Extract subtitle from media file to srt:")
-                    self.transcoder.extract_subtitles(file, folder)
-                print(f"\n* Analyze if file need transcoding")
-                info = self.transcoder.get_video_info(file)
-                if info["needs_transcoding"] is False:
-                    print(f"==> SKIP: Video codec and audio codec match expected format (hevc, aac)")
-                    continue
-                else:
-                    print(f"==> START TRANSCODING")
-                    exit_code = self.transcoder.process_video(file)
-                    print(f"==> TRANSCODING COMPLETED WITH EXIT CODE: {exit_code}")
-            scanner.manage_backups(self.backup_strategy, self.backup_dir)
+    def run(self):
+        """
+        Runs the media processing pipeline by processing pending jobs.
+
+        This method iterates over the list of pending jobs, extracts subtitles if specified,
+        analyzes and transcodes video files if necessary, and manages backups according to the specified strategy.
+
+        Returns:
+            None
+        """
+        for job in self.jobrepo.iter_pending():
+            print(f"\n---- PROCESS TASK {job.id}----")
+            if self.extract_subtitle:
+                self.transcoder.extract_subtitles(job.path, Path(job.path.parent))
+            info = self.transcoder.get_video_info(job.path)
+            if info["needs_transcoding"] is False:
+                print(
+                    f"[PIPELINE][SKIP] {job.path}: Video already in expected format (hevc, aac)"
+                )
+                self.jobrepo.mark_skipped(job.id)
+                continue
+            else:
+                print(f"[PIPELINE][TRANSCODING] {job.path}")
+                exit_code = self.transcoder.process_video(job.path)
+                print(
+                    f"[PIPELINE][TRANSCODING COMPLETE] {job.path} (Exit code: {exit_code})"
+                )
+                self._update_process_status_to_repo(exit_code, job)
+
+            # Add all temp file to be a job to be cleaned later
+            for temp_file in self.transcoder.get_temp_files():
+                self.jobrepo.enqueue_trash(temp_file)
+
+    def clean(self):
+        """
+        Cleans up temporary files generated during media processing.
+
+        This method iterates over the list of trash jobs, cleans up temporary files, and updates the job repository.
+
+        Returns:
+            None
+        """
+        for job in self.jobrepo.iter_trash():
+            print(f"\n---- CLEAN UP TASK {job.id}----")
+            self.transcoder.clean_temp_file(
+                job.path, self.backup_strategy, self.backup_dir
+            )
+            self._update_cleanup_status_to_repo(job)
+
+    def _update_process_status_to_repo(self, process_status: ProcessStatus, job: Job):
+        """
+        Updates the process status of a job in the repository.
+
+        Args:
+            process_status (ProcessStatus): The status of the process.
+            job (Job): The job to update.
+
+        Returns:
+            None
+        """
+        update_actions = {
+            ProcessStatus.SUCCESS: self.jobrepo.mark_done,
+            ProcessStatus.SKIPPED: self.jobrepo.mark_skipped,
+            ProcessStatus.FILE_NOT_FOUND: self.jobrepo.mark_error,
+            ProcessStatus.ERROR: self.jobrepo.mark_error,
+        }
+        action = update_actions.get(process_status)
+        if action:
+            action(job.id)
+
+    def _update_cleanup_status_to_repo(self, job: Job):
+        """
+        Updates the cleanup status of a job in the repository.
+
+        Args:
+            job (Job): The job to update.
+
+        Returns:
+            None
+        """
+        update_actions = {
+            BackupStrategy.DO_NOTHING: self.jobrepo.mark_skipped,
+            BackupStrategy.ARCHIVE: self.jobrepo.mark_archived,
+            BackupStrategy.DELETE: self.jobrepo.mark_deleted,
+        }
+        action = update_actions.get(self.backup_strategy)
+        if action:
+            action(job.id)

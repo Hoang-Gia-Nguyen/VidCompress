@@ -7,6 +7,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Dict, List
+from abc import ABC, abstractmethod
 
 class ProcessStatus(Enum):
     SUCCESS = 1
@@ -14,49 +15,35 @@ class ProcessStatus(Enum):
     FILE_NOT_FOUND = 3
     ERROR = 4
 
-class Transcoder:
+class BackupStrategy(Enum):
+    ARCHIVE = 1
+    DELETE = 2
+    DO_NOTHING = 3
+
+class Transcoder(ABC):
     """
     Base class for transcoding operations.
     """
     name = "base_empty"
+    temp_file_list = []
     
     def __init__(self):
         """Initialize the Transcoder base class."""
         pass
 
+    @abstractmethod
     def list_tools(self) -> Optional[List[str]]:
-        raise NotImplementedError("Subclasses of Transcoder must implement list_tools().")
-    
+        pass
+
+    @abstractmethod
     def check_availability(self) -> Optional[Dict]:
         """
         Checks if tools are installed and accessible.
         Returns a dictionary with the status and paths of tools.
         """
-        raise NotImplementedError("Subclasses of Transcoder must implement check_availability().")
-    
-    def get_video_info(self, input_path: Path) -> Optional[Dict]:
-        """
-        Uses ffprobe to extract video and audio codec information.
-        
-        Args:
-            input_path (Path): Path to the media file.
-            
-        Returns:
-            dict: A dictionary containing 'video_codec', 'audio_codec', and 'duration',
-                or None if the file cannot be parsed.
-        """
-        raise NotImplementedError("Subclasses of Transcoder must implement get_video_info().")
+        pass
 
-    def extract_subtitles(self, input_path: Path, output_dir: Path):
-        """
-        Detects and extracts all subtitle tracks from a video file into .srt files.
-        
-        Args:
-            input_path (Path): Path object pointing to the source video file.
-            output_dir (Path): Path object pointing to where .srt files should be saved.
-        """
-        raise NotImplementedError("Subclasses of Transcoder must implement extract_subtitles().")
-
+    @abstractmethod
     def get_video_info(self, input_path: Path) -> Optional[Dict]:
         """
         Uses tool to extract video and audio codec information.
@@ -66,9 +53,83 @@ class Transcoder:
             
         Returns:
             dict: A dictionary containing 'video_codec', 'audio_codec', and 'duration',
-                  or None if the file cannot be parsed.
+                or None if the file cannot be parsed.
         """
-        raise NotImplementedError("Subclasses of Transcoder must implement get_video_info().")
+        pass
+
+    @abstractmethod
+    def extract_subtitles(self, input_path: Path, output_dir: Path):
+        """
+        Detects and extracts all subtitle tracks from a video file into .srt files.
+        
+        Args:
+            input_path (Path): Path object pointing to the source video file.
+            output_dir (Path): Path object pointing to where .srt files should be saved.
+
+        Returns:
+            List[Path]: A list of Path objects representing the temporary files.
+        """
+        return self.temp_file_list
+    
+    @abstractmethod
+    def process_video(self, input_path: Path, output_path: Path = None) -> ProcessStatus:
+        """
+        Transcodes or copies video streams based on the existing codecs.
+    
+        Intelligently determines whether to transcode or copy the video and audio streams.
+        If output_path is specified, the result will be saved to that location.
+        Otherwise, the original file will be replaced after processing.
+
+        Args:
+            input_path (Path): The path to the input video file.
+            output_path (Path): The optional path where the processed video will be saved.
+
+        Returns:
+            ProcessStatus: The status of the processing operation.
+        """
+        pass
+    
+    def clean_temp_file(
+        self,
+        file: Path,
+        action: BackupStrategy,
+        archive_dest: Optional[str] = None,
+        pattern: Optional[str] = "*.originalmedia",
+    ):
+        """
+        Finds all files matching the provided pattern and either deletes them or moves them to an archive.
+
+        Args:
+            action (BackupStrategy): The action to perform on the found files.
+            archive_dest (str): The folder to move files to if action is 'archive'.
+            pattern (str): The pattern to search for. Defaults to "*.originalmedia".
+        """
+        if action == BackupStrategy.DO_NOTHING:
+            return
+
+        if action == BackupStrategy.ARCHIVE:
+            if not archive_dest:
+                return
+
+            dest_path = Path(archive_dest)
+            dest_path.mkdir(parents=True, exist_ok=True)
+
+            try:
+                # Move file to the archive folder
+                # Note: If duplicate filenames exist in different subfolders,
+                # we use the full name to avoid overwriting.
+                target = dest_path / file.name
+                shutil.move(str(file), str(target))
+                print(f"[Moved] {file.name} -> {archive_dest}")
+            except Exception as e:
+                print(f"[Error] Could not move {file.name}: {e}")
+
+        elif action == BackupStrategy.DELETE:
+            try:
+                file.unlink()
+                print(f"[Deleted] {file.name}")
+            except Exception as e:
+                print(f"[Error] Could not delete {file.name}: {e}")
 
 class FfmpegTranscoder(Transcoder):
     """
@@ -245,7 +306,7 @@ class FfmpegTranscoder(Transcoder):
 
         # VIDEO LOGIC: Skip transcoding if already HEVC (h265)
         if info["video_codec"] == 'hevc':
-            print(f"[~] Video is already H.265. Copying stream...")
+            print("[~] Video is already H.265. Copying stream...")
             command += ['-c:v', 'copy']
         else:
             print(f"[*] Transcoding video to H.265 using {self._best_hevc_encoder}...")
@@ -253,10 +314,10 @@ class FfmpegTranscoder(Transcoder):
 
         # AUDIO LOGIC: Skip transcoding if already AAC
         if 'aac' in info["audio_codec"]:
-            print(f"[~] Audio is already AAC. Copying stream...")
+            print("[~] Audio is already AAC. Copying stream...")
             command += ['-c:a', 'copy']
         else:
-            print(f"[*] Transcoding audio to AAC...")
+            print("[*] Transcoding audio to AAC...")
             command += ['-c:a', 'aac', '-b:a', '128k']
 
         # Add compatibility tag and output path
@@ -273,6 +334,7 @@ class FfmpegTranscoder(Transcoder):
                 input_path.rename(backup_path)
                 temp_output.rename(input_path)
                 print(f"[Done] Processed: {input_path.name}")
+            self.temp_file_list.append(Path(backup_path))
             return ProcessStatus.SUCCESS
             
         except subprocess.CalledProcessError as e:
