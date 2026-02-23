@@ -46,9 +46,10 @@ pipeline {
             publishHTML([
                 reportDir: 'htmlcov',
                 reportFiles: 'index.html',
-                reportName: 'Python Coverage Report',
-                keepAll: true,
-                alwaysLinkToLastBuild: true
+                reportName: 'Coverage Report',
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true
             ])
         }
     }

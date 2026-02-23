@@ -1,11 +1,10 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-
 markers = [
-    "unit: fast tests, no external dependencies",
-    "integration: requires ffmpeg and real files",
-    "e2e: full pipeline end-to-end tests",
+    "unit: unit tests",
+    "integration: integration tests",
+    "e2e: end-to-end tests",
 ]
 
 [tool.ruff]
