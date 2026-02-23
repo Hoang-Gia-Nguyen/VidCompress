@@ -1,7 +1,8 @@
-from app.media_scanner import MediaScanner
-from app.transcoder import Transcoder, ProcessStatus, BackupStrategy
-from app.jobrepo import JobRepository, Job
 from pathlib import Path
+
+from app.jobrepo import Job, JobRepository
+from app.media_scanner import MediaScanner
+from app.transcoder import BackupStrategy, ProcessStatus, Transcoder
 
 
 class Pipeline:
@@ -80,11 +81,16 @@ class Pipeline:
             None
         """
         for job in self.jobrepo.iter_pending():
-            print(f"\n---- PROCESS TASK {job.id}----")
+            print(f"\n---- PROCESS TASK {job.id}: {job.path}----")
             if self.extract_subtitle:
                 self.transcoder.extract_subtitles(job.path, Path(job.path.parent))
             info = self.transcoder.get_video_info(job.path)
-            if info["needs_transcoding"] is False:
+            if info is None:
+                print(
+                    f"[PIPELINE][SKIP] {job.path}: No video information can be extracted!!!"
+                )
+                continue
+            if info.needs_transcoding is False:
                 print(
                     f"[PIPELINE][SKIP] {job.path}: Video already in expected format (hevc, aac)"
                 )
@@ -99,7 +105,9 @@ class Pipeline:
                 self._update_process_status_to_repo(exit_code, job)
 
             # Add all temp file to be a job to be cleaned later
-            for temp_file in self.transcoder.get_temp_files():
+            temp_files = self.transcoder.get_temp_files()
+            for temp_file in temp_files:
+                print(f"[PIPELINE][ADD TRASH] Add file to trash list {temp_file}")
                 self.jobrepo.enqueue_trash(temp_file)
 
     def clean(self):
@@ -113,8 +121,11 @@ class Pipeline:
         """
         for job in self.jobrepo.iter_trash():
             print(f"\n---- CLEAN UP TASK {job.id}----")
+            # self.transcoder.clean_temp_file(
+            #     job.path, self.backup_strategy, self.backup_dir
+            # )
             self.transcoder.clean_temp_file(
-                job.path, self.backup_strategy, self.backup_dir
+                file=job.path, action=self.backup_strategy, archive_dest=self.backup_dir
             )
             self._update_cleanup_status_to_repo(job)
 

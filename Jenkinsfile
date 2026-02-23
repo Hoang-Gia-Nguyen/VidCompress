@@ -30,7 +30,7 @@ pipeline {
         stage('Run Tests') {
             steps {
                 // Setting PYTHONPATH to the current workspace and running pytest
-                sh 'pytest -s --html=report.html --self-contained-html --junitxml=results.xml || true'
+                sh 'pytest -s --html=report.html --self-contained-html --junitxml=results.xml --cov=app --cov-report=html --cov-fail-under=75 || true'
             }
         }
     }
@@ -42,6 +42,14 @@ pipeline {
             
             // Optional: Store the pretty HTML report as an artifact
             archiveArtifacts artifacts: 'report.html', fingerprint: true
+
+            publishHTML([
+                reportDir: 'htmlcov',
+                reportFiles: 'index.html',
+                reportName: 'Python Coverage Report',
+                keepAll: true,
+                alwaysLinkToLastBuild: true
+            ])
         }
     }
 }

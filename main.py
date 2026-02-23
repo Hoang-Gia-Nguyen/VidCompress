@@ -1,9 +1,10 @@
 import json
 import os
-from app.media_scanner import MediaScanner
-from app.transcoder import FfmpegTranscoder, BackupStrategy
+
 from app.jobrepo import SQLiteJobRepository
+from app.media_scanner import MediaScanner
 from app.pipeline import Pipeline
+from app.transcoder import BackupStrategy, FfmpegTranscoder
 
 basedir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(basedir, "config.json")

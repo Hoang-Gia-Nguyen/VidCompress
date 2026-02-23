@@ -1,11 +1,10 @@
-from dataclasses import dataclass
+import sqlite3
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Optional, Iterator
-import sqlite3
-
+from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Iterator, Optional
 
 
 class EnqueueResult(Enum):

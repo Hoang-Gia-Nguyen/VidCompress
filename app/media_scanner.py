@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Iterator, Optional
+from typing import Iterator, List, Optional
 
 
 class MediaScanner:
