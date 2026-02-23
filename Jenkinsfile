@@ -27,10 +27,42 @@ pipeline {
             }
         }
 
-        stage('Run Tests') {
+        stage('Lint') {
             steps {
-                // Setting PYTHONPATH to the current workspace and running pytest
-                sh 'pytest -s --html=report.html --self-contained-html --junitxml=results.xml --cov=app --cov-report=html --cov-fail-under=75 || true'
+                sh 'ruff check .'
+            }
+        }
+
+        stage('Run Unit Tests') {
+            steps {
+                sh 'pytest -m unit -s --html=report-unit.html --self-contained-html --junitxml=results-unit.xml --cov=app --cov-report=html --cov-fail-under=80'
+            }
+            post {
+                always {
+                    junit testResults: 'results-unit.xml', skipPublishingChecks: true
+                }
+            }
+        }
+
+        stage('Run Integration Tests') {
+            steps {
+                sh 'pytest -m integration -s --html=report-integration.html --self-contained-html --junitxml=results-integration.xml'
+            }
+            post {
+                always {
+                    junit testResults: 'results-integration.xml', skipPublishingChecks: true
+                }
+            }
+        }
+
+        stage('Run E2E Tests') {
+            steps {
+                sh 'pytest -m e2e -s --html=report-e2e.html --self-contained-html --junitxml=results-e2e.xml'
+            }
+            post {
+                always {
+                    junit testResults: 'results-e2e.xml', skipPublishingChecks: true
+                }
             }
         }
     }

@@ -13,7 +13,7 @@ def test_check_ffmpeg_availability(mock_returncode, expected_result):
     side_effects = []
     transcoder = FfmpegTranscoder()
 
-    if mock_returncode == FileNotFoundError:
+    if mock_returncode is FileNotFoundError:
         side_effects = [FileNotFoundError, FileNotFoundError]
     else:
         mock_ffmpeg = MagicMock()
