@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'hgnguyen37/python-ffmpeg:3.12-slim-stable' // Using the custom python:3.12 with ffmpeg
+            image 'hgnguyen37/python-ffmpeg-pytest:3.12-slim-stable' // Using the custom python:3.12 with ffmpeg
         }
     }
 
