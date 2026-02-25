@@ -7,3 +7,4 @@ config.json
 .coverage
 .coveragerc
 htmlcov
+./media_job.db

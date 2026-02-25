@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'hgnguyen37/python-ffmpeg:3.12-slim' // Using the custom python:3.12 with ffmpeg
+            image 'hgnguyen37/python-ffmpeg:3.12-slim-stable' // Using the custom python:3.12 with ffmpeg
         }
     }
 
@@ -20,12 +20,13 @@ pipeline {
             }
         }
 
-        stage('Install Dependencies') {
-            steps {
-                sh 'pip install --upgrade pip'
-                sh 'pip install -r requirements.txt'
-            }
-        }
+        // stage('Install Dependencies') {
+        //     steps {
+        //         sh 'pip install --upgrade pip'
+        //         sh 'pip install -r requirements.txt'
+        //     }
+        // }
+        // Dependency installation is skipped as it is pre-installed in the Docker image
 
         stage('Lint') {
             steps {
