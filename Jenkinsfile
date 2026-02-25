@@ -20,14 +20,6 @@ pipeline {
             }
         }
 
-        // stage('Install Dependencies') {
-        //     steps {
-        //         sh 'pip install --upgrade pip'
-        //         sh 'pip install -r requirements.txt'
-        //     }
-        // }
-        // Dependency installation is skipped as it is pre-installed in the Docker image
-
         stage('Lint') {
             steps {
                 sh 'ruff check .'
