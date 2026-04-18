@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
+from app.config import BackupStrategy
+from app.logger import logger
+
 class ProcessStatus(Enum):
     SUCCESS = 1
     SKIPPED = 2
@@ -18,10 +21,10 @@ class ProcessStatus(Enum):
     ERROR = 4
 
 
-class BackupStrategy(Enum):
-    ARCHIVE = 1
-    DELETE = 2
-    DO_NOTHING = 3
+@dataclass
+class ProcessResult:
+    status: ProcessStatus
+    error_message: Optional[str] = None
 
 
 @dataclass
@@ -84,9 +87,9 @@ class Transcoder(ABC):
         pass
 
     @abstractmethod
-    def process_video(
-        self, input_path: Path, output_path: Path = None
-    ) -> ProcessStatus:
+    def process_video(self,
+                      input_path: Path,
+                      output_path: Path = None) -> ProcessResult:
         """
         Transcodes or copies video streams based on the existing codecs.
 
@@ -99,7 +102,7 @@ class Transcoder(ABC):
             output_path (Path): The optional path where the processed video will be saved.
 
         Returns:
-            ProcessStatus: The status of the processing operation.
+            ProcessResult: The result of the processing operation.
         """
         pass
 
@@ -143,16 +146,16 @@ class Transcoder(ABC):
                 # we use the full name to avoid overwriting.
                 target = dest_path / file.name
                 shutil.move(str(file), str(target))
-                print(f"[Moved] {file.name} -> {archive_dest}")
+                logger.info(f"[Moved] {file.name} -> {archive_dest}")
             except Exception as e:
-                print(f"[Error] Could not move {file.name}: {e}")
+                logger.error(f"[Error] Could not move {file.name}: {e}")
 
         elif action == BackupStrategy.DELETE:
             try:
                 file.unlink()
-                print(f"[Deleted] {file.name}")
+                logger.info(f"[Deleted] {file.name}")
             except Exception as e:
-                print(f"[Error] Could not delete {file.name}: {e}")
+                logger.error(f"[Error] Could not delete {file.name}: {e}")
 
 
 class FfmpegTranscoder(Transcoder):
@@ -166,10 +169,10 @@ class FfmpegTranscoder(Transcoder):
         self._best_hevc_encoder = "libx265"
         super().__init__()
         tool_list = self.list_tools()
-        print(f"Tools to be used: {tool_list}")
+        logger.debug(f"Tools to be used: {tool_list}")
         tool_availability = self.check_availability()
         for tool in tool_list:
-            print(
+            logger.debug(
                 f"Tool [{tool}] available={tool_availability[tool]['available']} && path={tool_availability[tool]['path']}"
             )
             if not tool_availability[tool]["available"]:
@@ -177,7 +180,8 @@ class FfmpegTranscoder(Transcoder):
                     f"[FfmpegTranscoder] Cannot initialize, transcoder listed tool {tool} is not available in system"
                 )
         self._best_hevc_encoder = self._get_best_hevc_encoder()
-        print(f"[FfmpegTranscoder] Best HEVC encoder: {self._best_hevc_encoder}")
+        logger.info(
+            f"[FfmpegTranscoder] Best HEVC encoder: {self._best_hevc_encoder}")
 
     def list_tools(self) -> list:
         return ["ffmpeg", "ffprobe"]
@@ -195,9 +199,10 @@ class FfmpegTranscoder(Transcoder):
             if path:
                 # Optionally verify by running --version to ensure it's not a dummy file
                 try:
-                    subprocess.run(
-                        [tool, "-version"], capture_output=True, text=True, check=True
-                    )
+                    subprocess.run([tool, "-version"],
+                                   capture_output=True,
+                                   text=True,
+                                   check=True)
                     results[tool] = {"available": True, "path": path}
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     results[tool] = {"available": False, "path": None}
@@ -231,7 +236,10 @@ class FfmpegTranscoder(Transcoder):
 
         try:
             # Execute the command and capture the output
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            result = subprocess.run(command,
+                                    capture_output=True,
+                                    text=True,
+                                    check=True)
             data = json.loads(result.stdout)
 
             video_codec = None
@@ -252,7 +260,8 @@ class FfmpegTranscoder(Transcoder):
             if video_codec == "hevc" and "aac" in audio_codec:
                 needs_transcoding = False
 
-            return VideoInfo(video_codec, audio_codec, duration, needs_transcoding)
+            return VideoInfo(video_codec, audio_codec, duration,
+                             needs_transcoding)
         except Exception:
             return None
 
@@ -276,7 +285,10 @@ class FfmpegTranscoder(Transcoder):
 
         try:
             # Run command, capturing output to keep logs clean
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            result = subprocess.run(cmd,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5)
             return result.returncode == 0
         except Exception:
             return False
@@ -288,9 +300,10 @@ class FfmpegTranscoder(Transcoder):
         """
         try:
             # Get list of all encoders supported by the installed FFmpeg
-            result = subprocess.run(
-                ["ffmpeg", "-encoders"], capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(["ffmpeg", "-encoders"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=True)
             output = result.stdout
 
             # Define priority list for HEVC hardware encoders
@@ -319,16 +332,16 @@ class FfmpegTranscoder(Transcoder):
         except subprocess.CalledProcessError:
             return "Error: FFmpeg not found or failed to run."
 
-    def process_video(self, input_path: Path, output_path: Path = None):
+    def process_video(self, input_path: Path, output_path: Path = None) -> ProcessResult:
         """
         Intelligently transcodes or copies streams based on existing codecs.
         """
         # 1. Get metadata first (using the function we wrote earlier)
         info = self.get_video_info(input_path)
         if not info:
-            return ProcessStatus.FILE_NOT_FOUND
+            return ProcessResult(ProcessStatus.FILE_NOT_FOUND, "Could not extract video info")
         if info.needs_transcoding is False:
-            return ProcessStatus.SKIPPED
+            return ProcessResult(ProcessStatus.SKIPPED)
 
         # 2. Determine paths
         temp_output = input_path.with_suffix(".transcoding.mp4")
@@ -339,10 +352,12 @@ class FfmpegTranscoder(Transcoder):
 
         # VIDEO LOGIC: Skip transcoding if already HEVC (h265)
         if info.video_codec == "hevc":
-            print("[~] Video is already H.265. Copying stream...")
+            logger.info(f"[~] {input_path.name}: Video is already H.265. Copying stream...")
             command += ["-c:v", "copy"]
         else:
-            print(f"[*] Transcoding video to H.265 using {self._best_hevc_encoder}...")
+            logger.info(
+                f"[*] {input_path.name}: Transcoding video to H.265 using {self._best_hevc_encoder}..."
+            )
             command += [
                 "-c:v",
                 self._best_hevc_encoder,
@@ -354,10 +369,10 @@ class FfmpegTranscoder(Transcoder):
 
         # AUDIO LOGIC: Skip transcoding if already AAC
         if "aac" in info.audio_codec:
-            print("[~] Audio is already AAC. Copying stream...")
+            logger.info(f"[~] {input_path.name}: Audio is already AAC. Copying stream...")
             command += ["-c:a", "copy"]
         else:
-            print("[*] Transcoding audio to AAC...")
+            logger.info(f"[*] {input_path.name}: Transcoding audio to AAC...")
             command += ["-c:a", "aac", "-b:a", "128k"]
 
         # Add compatibility tag and output path
@@ -366,24 +381,29 @@ class FfmpegTranscoder(Transcoder):
 
         # 4. Execute
         try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"[-] FFmpeg Failed for {input_path.name}: {result.stderr}")
+                if temp_output.exists():
+                    temp_output.unlink()
+                return ProcessResult(ProcessStatus.ERROR, result.stderr)
 
             # 5. Swap files (Replace original)
             if output_path is None:
-                backup_path = input_path.with_suffix(
-                    input_path.suffix + ".originalmedia"
-                )
+                backup_path = input_path.with_suffix(input_path.suffix +
+                                                     ".originalmedia")
                 input_path.rename(backup_path)
                 temp_output.rename(input_path)
-                print(f"[Done] Processed: {input_path.name}")
-            self.temp_file_list.append(Path(backup_path))
-            return ProcessStatus.SUCCESS
+                logger.info(f"[Done] Processed: {input_path.name}")
+                self.temp_file_list.append(Path(backup_path))
+            
+            return ProcessResult(ProcessStatus.SUCCESS)
 
-        except subprocess.CalledProcessError as e:
-            print(f"[-] FFmpeg Failed: {e.stderr}")
+        except Exception as e:
+            logger.error(f"[-] Unexpected error for {input_path.name}: {str(e)}")
             if temp_output.exists():
                 temp_output.unlink()
-            return ProcessStatus.ERROR
+            return ProcessResult(ProcessStatus.ERROR, str(e))
 
     def extract_subtitles(self, input_path: Path, output_dir: Path):
         """
@@ -398,6 +418,8 @@ class FfmpegTranscoder(Transcoder):
             "ffprobe",
             "-v",
             "error",
+            "-analyzeduration",
+            "0",
             "-show_entries",
             "stream=index:tags=language",
             "-select_streams",
@@ -410,18 +432,19 @@ class FfmpegTranscoder(Transcoder):
 
         try:
             start_time = time.perf_counter()
-            result = subprocess.run(
-                probe_command, capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(probe_command,
+                                    capture_output=True,
+                                    text=True,
+                                    check=True)
             end_time = time.perf_counter()
             streams = json.loads(result.stdout).get("streams", [])
 
             if not streams:
-                print(f"No subtitle streams found in: {input_path.name}")
+                logger.debug(f"No subtitle streams found in: {input_path.name}")
                 return
             else:
-                print(
-                    f"Found {len(streams)} subtitle streams in file in {end_time-start_time}s"
+                logger.info(
+                    f"Found {len(streams)} subtitle streams in {input_path.name} in {end_time-start_time:.2f}s"
                 )
 
             # 2. Extract each subtitle stream
@@ -435,10 +458,10 @@ class FfmpegTranscoder(Transcoder):
                 srt_path = output_dir / srt_filename
 
                 if srt_path.exists():
-                    print(f"Skipping {srt_filename}: File already exists.")
+                    logger.debug(f"Skipping {srt_filename}: File already exists.")
                     continue  # Move to the next iteration
 
-                print(
+                logger.info(
                     f"Extracting subtitle stream #{index} ({lang}) to {srt_filename}..."
                 )
 
@@ -453,9 +476,11 @@ class FfmpegTranscoder(Transcoder):
                     str(srt_path),  # Output path
                 ]
 
-                subprocess.run(extract_command, capture_output=True, check=True)
+                subprocess.run(extract_command,
+                               capture_output=True,
+                               check=True)
 
         except subprocess.CalledProcessError as e:
-            print(f"Error processing {input_path.name}: {e.stderr}")
+            logger.error(f"Error extracting subtitles from {input_path.name}: {e.stderr}")
         except Exception as e:
-            print(f"An unexpected error occurred: {e}")
+            logger.error(f"An unexpected error occurred during subtitle extraction for {input_path.name}: {e}")

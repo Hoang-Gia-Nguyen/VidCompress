@@ -8,3 +8,6 @@ config.json
 .coveragerc
 htmlcov
 media_job.db
+GEMINI.md
+CLAUDE.md
+AGENTS.md

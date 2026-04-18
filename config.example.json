@@ -2,5 +2,7 @@
     "MEDIA_DIRS": ["your_sonarr_dir", "your_radarr_dir"],
     "BACKUP_DIR": "/Volumes/MEDIA/archive",
     "EXTRACT_SUBTITLE": false,
-    "BACKUP_STRATEGY": "ARCHIVE"
+    "BACKUP_STRATEGY": "ARCHIVE",
+    "JOB_REPO_FILE": "jobs.db",
+    "LOG_LEVEL": "INFO"
 }

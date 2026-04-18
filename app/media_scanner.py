@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Iterator, List, Optional
 
+from app.logger import logger
 
 class MediaScanner:
     """
@@ -59,8 +60,8 @@ class MediaScanner:
         # Check if the provided path is a valid directory
         root_path = Path(root_dir)
         if not root_path.exists() or not root_path.is_dir():
-            print(
-                f"Error: The directory '{root_dir}' does not exist or is not a directory."
+            logger.error(
+                f"The directory '{root_dir}' does not exist or is not a directory."
             )
             return []
 

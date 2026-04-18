@@ -134,6 +134,8 @@ class JobRepository(ABC):
         pass
 
 
+from app.logger import logger
+
 class SQLiteJobRepository(JobRepository):
 
     def __init__(self, db_path: str):
@@ -277,7 +279,7 @@ class SQLiteJobRepository(JobRepository):
             return Job(id=row["id"], path=Path(row["path"]))
 
     def mark_done(self, job_id: int) -> None:
-        print(f"[SQLiteJobRepository] Mark done for id {job_id}")
+        logger.debug(f"[SQLiteJobRepository] Mark done for id {job_id}")
         with self._conn() as conn:
             conn.execute(
                 """
@@ -290,7 +292,7 @@ class SQLiteJobRepository(JobRepository):
             )
 
     def mark_skipped(self, job_id: int) -> None:
-        print(f"[SQLiteJobRepository] Mark skipped for id {job_id}")
+        logger.debug(f"[SQLiteJobRepository] Mark skipped for id {job_id}")
         with self._conn() as conn:
             conn.execute(
                 """
@@ -303,7 +305,7 @@ class SQLiteJobRepository(JobRepository):
             )
 
     def mark_deleted(self, job_id: int) -> None:
-        print(f"[JOBREPO] Mark deleted for id {job_id}")
+        logger.debug(f"[SQLiteJobRepository] Mark deleted for id {job_id}")
         with self._conn() as conn:
             conn.execute(
                 """
@@ -316,7 +318,7 @@ class SQLiteJobRepository(JobRepository):
             )
 
     def mark_archived(self, job_id: int) -> None:
-        print(f"[SQLiteJobRepository] Mark archived for id {job_id}")
+        logger.debug(f"[SQLiteJobRepository] Mark archived for id {job_id}")
         with self._conn() as conn:
             conn.execute(
                 """
@@ -329,7 +331,7 @@ class SQLiteJobRepository(JobRepository):
             )
 
     def mark_error(self, job_id: int, error: str) -> None:
-        print(f"[SQLiteJobRepository] Mark error for id {job_id}")
+        logger.debug(f"[SQLiteJobRepository] Mark error for id {job_id}")
         with self._conn() as conn:
             conn.execute(
                 """

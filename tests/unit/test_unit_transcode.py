@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from app.transcoder import FfmpegTranscoder, ProcessStatus, VideoInfo
+from app.transcoder import FfmpegTranscoder, ProcessResult, ProcessStatus, VideoInfo
 
 
 @pytest.mark.parametrize(
@@ -204,10 +204,10 @@ def test_process_video_unit(video_info, expected_status):
         "with_suffix",
         side_effect=lambda s: Path(str(input_path).replace(".mp4", s)),
     ):
+        mock_run.return_value.returncode = 0
+        result = transcoder.process_video(input_path)
 
-        status = transcoder.process_video(input_path)
-
-        assert status == expected_status
+        assert result.status == expected_status
 
         if expected_status == ProcessStatus.SUCCESS:
             mock_run.assert_called_once()
@@ -232,5 +232,5 @@ def test_process_video_ffmpeg_fail(mock_run, mock_returncode):
 
     transcoder = FfmpegTranscoder()
     file_obj = Path("tests/videos_temp/test_need_transcode.mkv")
-    status = transcoder.process_video(file_obj)
-    assert status == ProcessStatus.FILE_NOT_FOUND
+    result = transcoder.process_video(file_obj)
+    assert result.status == ProcessStatus.FILE_NOT_FOUND

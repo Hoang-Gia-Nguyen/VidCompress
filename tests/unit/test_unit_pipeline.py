@@ -5,7 +5,7 @@ import pytest
 
 from app.jobrepo import Job
 from app.pipeline import Pipeline
-from app.transcoder import BackupStrategy, ProcessStatus, VideoInfo
+from app.transcoder import BackupStrategy, ProcessResult, ProcessStatus, VideoInfo
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def test_run_transcode_success_updates_repo(pipeline, mock_jobrepo, mock_transco
     mock_jobrepo.iter_pending.return_value = [job]
 
     mock_transcoder.get_video_info.return_value = VideoInfo(needs_transcoding=True)
-    mock_transcoder.process_video.return_value = ProcessStatus.SUCCESS
+    mock_transcoder.process_video.return_value = ProcessResult(status=ProcessStatus.SUCCESS)
 
     pipeline.run()
 

@@ -1,8 +1,10 @@
 from pathlib import Path
 
+from app.config import BackupStrategy
 from app.jobrepo import Job, JobRepository
+from app.logger import logger
 from app.media_scanner import MediaScanner
-from app.transcoder import BackupStrategy, ProcessStatus, Transcoder
+from app.transcoder import ProcessResult, ProcessStatus, Transcoder
 
 
 class Pipeline:
@@ -65,7 +67,7 @@ class Pipeline:
         Returns:
             None
         """
-        print("\n[PIPELINE] Start pipeline!!!")
+        logger.info("Starting pipeline scan...")
         for dir in self.media_dirs:
             for file in self.scanner.iter_media_files(dir):
                 self.jobrepo.enqueue(file)
@@ -81,33 +83,30 @@ class Pipeline:
             None
         """
         for job in self.jobrepo.iter_pending():
-            print(f"\n---- PROCESS TASK {job.id}: {job.path}----")
+            logger.info(f"Processing task {job.id}: {job.path.name}")
             if self.extract_subtitle:
                 self.transcoder.extract_subtitles(job.path, Path(job.path.parent))
+            
             info = self.transcoder.get_video_info(job.path)
             if info is None:
-                print(
-                    f"[PIPELINE][SKIP] {job.path}: No video information can be extracted!!!"
-                )
+                logger.warning(f"No video information could be extracted for {job.path}")
+                self.jobrepo.mark_error(job.id, "No video info extracted")
                 continue
+                
             if info.needs_transcoding is False:
-                print(
-                    f"[PIPELINE][SKIP] {job.path}: Video already in expected format (hevc, aac)"
-                )
+                logger.info(f"Skipping {job.path.name}: Already in target format")
                 self.jobrepo.mark_skipped(job.id)
                 continue
-            else:
-                print(f"[PIPELINE][TRANSCODING] {job.path}")
-                exit_code = self.transcoder.process_video(job.path)
-                print(
-                    f"[PIPELINE][TRANSCODING COMPLETE] {job.path} (Exit code: {exit_code})"
-                )
-                self._update_process_status_to_repo(exit_code, job)
+            
+            logger.info(f"Transcoding {job.path.name}...")
+            result = self.transcoder.process_video(job.path)
+            logger.info(f"Transcoding complete for {job.path.name} (Status: {result.status.name})")
+            self._update_process_status_to_repo(result, job)
 
             # Add all temp file to be a job to be cleaned later
             temp_files = self.transcoder.get_temp_files()
             for temp_file in temp_files:
-                print(f"[PIPELINE][ADD TRASH] Add file to trash list {temp_file}")
+                logger.debug(f"Adding to trash: {temp_file}")
                 self.jobrepo.enqueue_trash(temp_file)
 
     def clean(self):
@@ -119,36 +118,33 @@ class Pipeline:
         Returns:
             None
         """
+        logger.info("Starting cleanup...")
         for job in self.jobrepo.iter_trash():
-            print(f"\n---- CLEAN UP TASK {job.id}----")
-            # self.transcoder.clean_temp_file(
-            #     job.path, self.backup_strategy, self.backup_dir
-            # )
+            logger.info(f"Cleaning up task {job.id}: {job.path.name}")
             self.transcoder.clean_temp_file(
                 file=job.path, action=self.backup_strategy, archive_dest=self.backup_dir
             )
             self._update_cleanup_status_to_repo(job)
 
-    def _update_process_status_to_repo(self, process_status: ProcessStatus, job: Job):
+    def _update_process_status_to_repo(self, result: ProcessResult, job: Job):
         """
         Updates the process status of a job in the repository.
 
         Args:
-            process_status (ProcessStatus): The status of the process.
+            result (ProcessResult): The result of the process.
             job (Job): The job to update.
 
         Returns:
             None
         """
-        update_actions = {
-            ProcessStatus.SUCCESS: self.jobrepo.mark_done,
-            ProcessStatus.SKIPPED: self.jobrepo.mark_skipped,
-            ProcessStatus.FILE_NOT_FOUND: self.jobrepo.mark_error,
-            ProcessStatus.ERROR: self.jobrepo.mark_error,
-        }
-        action = update_actions.get(process_status)
-        if action:
-            action(job.id)
+        if result.status == ProcessStatus.SUCCESS:
+            self.jobrepo.mark_done(job.id)
+        elif result.status == ProcessStatus.SKIPPED:
+            self.jobrepo.mark_skipped(job.id)
+        elif result.status == ProcessStatus.FILE_NOT_FOUND:
+            self.jobrepo.mark_error(job.id, result.error_message or "File not found")
+        elif result.status == ProcessStatus.ERROR:
+            self.jobrepo.mark_error(job.id, result.error_message or "Unknown error")
 
     def _update_cleanup_status_to_repo(self, job: Job):
         """
