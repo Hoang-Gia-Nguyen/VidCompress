@@ -20,6 +20,12 @@ pipeline {
             }
         }
 
+        stage('Install dependencies') {
+            steps {
+                sh 'pip install -r requirements.txt'
+            }
+        }
+
         stage('Lint') {
             steps {
                 sh 'ruff check .'
