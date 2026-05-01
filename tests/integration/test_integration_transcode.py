@@ -136,17 +136,17 @@ def test_extract_subtitles(file_path):
 def test_process_video(file_path, needs_transcoding):
     transcoder = FfmpegTranscoder()
     file_obj = Path(file_path)
-    status = transcoder.process_video(file_obj)
+    result = transcoder.process_video(file_obj)
     if not file_obj.exists():
-        assert status == ProcessStatus.FILE_NOT_FOUND
+        assert result.status == ProcessStatus.FILE_NOT_FOUND
     elif needs_transcoding:
         info = transcoder.get_video_info(file_obj)
-        assert status == ProcessStatus.SUCCESS
+        assert result.status == ProcessStatus.SUCCESS
         assert info.needs_transcoding is False
         original_file_obj = Path(file_path + ".originalmedia")
         assert original_file_obj.exists()
     else:
-        assert status == ProcessStatus.SKIPPED
+        assert result.status == ProcessStatus.SKIPPED
 
 
 # TODO: Write a test case use mock to simulate ffmpeg fail, return ProcessStatus.ERROR

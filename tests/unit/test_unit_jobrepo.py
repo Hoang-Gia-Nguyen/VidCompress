@@ -23,17 +23,10 @@ def repo(db_path: Path) -> SQLiteJobRepository:
 
 
 @pytest.fixture
-def sample_media_path() -> Path:
-    """
-    Use an existing test media file if available,
-    otherwise fall back to a dummy path.
-    """
-    media_dir = Path("tests/video_temp")
-    if media_dir.exists():
-        for p in media_dir.iterdir():
-            if p.is_file():
-                return p
-    return Path("tests/video_temp/dummy.mp4")
+def sample_media_path(tmp_path: Path) -> Path:
+    p = tmp_path / "dummy.mp4"
+    p.write_text("fake media content")
+    return p
 
 
 # ---------- helpers ----------
@@ -64,6 +57,20 @@ def test_enqueue_new_job(repo: SQLiteJobRepository, sample_media_path: Path):
 def test_enqueue_same_job_skipped(repo: SQLiteJobRepository, sample_media_path: Path):
     assert repo.enqueue(sample_media_path) is EnqueueResult.NEW
     assert repo.enqueue(sample_media_path) is EnqueueResult.SKIPPED
+
+
+def test_enqueue_file_changed_reenqueues(repo: SQLiteJobRepository, sample_media_path: Path):
+    assert repo.enqueue(sample_media_path) is EnqueueResult.NEW
+    
+    # Simulate content change
+    sample_media_path.write_text("modified content")
+    # Also ensure mtime changes (some systems might have low mtime precision)
+    import os
+    import time
+    new_mtime = time.time() + 10
+    os.utime(sample_media_path, (new_mtime, new_mtime))
+
+    assert repo.enqueue(sample_media_path) is EnqueueResult.NEW
 
 
 # def test_enqueue_retry_failed_job(repo: SQLiteJobRepository, sample_media_path: Path):
@@ -145,10 +152,11 @@ def test_mark_error_sets_error_and_status(
 # ---------- iter_pending ----------
 
 
-def test_iter_pending_yields_all_jobs_in_order(repo: SQLiteJobRepository):
-    paths = [Path(f"/tmp/file_{i}.mp4") for i in range(3)]
+def test_iter_pending_yields_all_jobs_in_order(repo: SQLiteJobRepository, tmp_path: Path):
+    paths = [tmp_path / f"file_{i}.mp4" for i in range(3)]
 
     for p in paths:
+        p.write_text("content")
         repo.enqueue(p)
 
     jobs = list(repo.iter_pending())
@@ -165,9 +173,11 @@ def test_iter_pending_empty(repo: SQLiteJobRepository):
 # ---------- trash flow ----------
 
 
-def test_enqueue_and_iter_trash(repo: SQLiteJobRepository):
-    p1 = Path("/tmp/trash1.mp4")
-    p2 = Path("/tmp/trash2.mp4")
+def test_enqueue_and_iter_trash(repo: SQLiteJobRepository, tmp_path: Path):
+    p1 = tmp_path / "trash1.mp4"
+    p2 = tmp_path / "trash2.mp4"
+    p1.write_text("trash")
+    p2.write_text("trash")
 
     repo.enqueue_trash(p1)
     repo.enqueue_trash(p2)
@@ -178,8 +188,9 @@ def test_enqueue_and_iter_trash(repo: SQLiteJobRepository):
     assert [j.path for j in jobs] == [p1.resolve(), p2.resolve()]
 
 
-def test_get_next_trash_marks_processing(repo: SQLiteJobRepository, db_path: Path):
-    p = Path("/tmp/trash.mp4")
+def test_get_next_trash_marks_processing(repo: SQLiteJobRepository, db_path: Path, tmp_path: Path):
+    p = tmp_path / "trash.mp4"
+    p.write_text("trash")
     repo.enqueue_trash(p)
 
     job = repo.get_next_trash()

@@ -6,6 +6,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Iterator, Optional
 
+from app.logger import logger
+
 
 class EnqueueResult(Enum):
     NEW = "new"
@@ -134,8 +136,6 @@ class JobRepository(ABC):
         pass
 
 
-from app.logger import logger
-
 class SQLiteJobRepository(JobRepository):
 
     def __init__(self, db_path: str):
@@ -149,6 +149,8 @@ class SQLiteJobRepository(JobRepository):
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT UNIQUE,
+                size INTEGER,
+                mtime REAL,
                 status TEXT NOT NULL,
                 error TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -173,10 +175,14 @@ class SQLiteJobRepository(JobRepository):
     def enqueue(self, path: Path) -> EnqueueResult:
         path = path.resolve()
         path_str = str(path)
+        
+        stat = path.stat()
+        current_size = stat.st_size
+        current_mtime = stat.st_mtime
 
         with self._conn() as conn:
             cur = conn.execute(
-                "SELECT status FROM jobs WHERE path = ?",
+                "SELECT status, size, mtime FROM jobs WHERE path = ?",
                 (path_str,),
             )
             row = cur.fetchone()
@@ -185,17 +191,34 @@ class SQLiteJobRepository(JobRepository):
             if row is None:
                 conn.execute(
                     """
-                    INSERT INTO jobs (path, status)
-                    VALUES (?, 'pending')
+                    INSERT INTO jobs (path, size, mtime, status)
+                    VALUES (?, ?, ?, 'pending')
                     """,
-                    (path_str,),
+                    (path_str, current_size, current_mtime),
                 )
                 return EnqueueResult.NEW
 
-            status = row[0]
+            status, saved_size, saved_mtime = row["status"], row["size"], row["mtime"]
 
-            # Case 2: retry job failed
-            if status == "failed":
+            # Case 2: File has changed (size or mtime)
+            if current_size != saved_size or current_mtime != saved_mtime:
+                logger.info(f"File changed: {path_str}. Re-enqueuing.")
+                conn.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'pending',
+                        size = ?,
+                        mtime = ?,
+                        error = NULL,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE path = ?
+                    """,
+                    (current_size, current_mtime, path_str),
+                )
+                return EnqueueResult.NEW
+
+            # Case 3: retry job failed (though I used 'error' in current impl, let's keep consistency)
+            if status == "error" or status == "failed":
                 conn.execute(
                     """
                     UPDATE jobs
@@ -207,7 +230,7 @@ class SQLiteJobRepository(JobRepository):
                 )
                 return EnqueueResult.RETRY
 
-            # Case 3: pending / processing / done
+            # Case 4: pending / processing / done
             return EnqueueResult.SKIPPED
 
     def enqueue_trash(self, path: Path) -> EnqueueResult:

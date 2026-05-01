@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-from pathlib import Path
 
 from app.config import AppConfig
 from app.jobrepo import SQLiteJobRepository

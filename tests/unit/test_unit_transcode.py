@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from app.transcoder import FfmpegTranscoder, ProcessResult, ProcessStatus, VideoInfo
+from app.transcoder import FfmpegTranscoder, ProcessStatus, VideoInfo
 
 
 @pytest.mark.parametrize(
@@ -227,10 +227,15 @@ def test_process_video_unit(video_info, expected_status):
 def test_process_video_ffmpeg_fail(mock_run, mock_returncode):
     mock_proc = MagicMock()
     mock_proc.stdout = ""
+    mock_proc.stderr = "ffmpeg error"
     mock_proc.returncode = mock_returncode
     mock_run.return_value = mock_proc
 
     transcoder = FfmpegTranscoder()
     file_obj = Path("tests/videos_temp/test_need_transcode.mkv")
-    result = transcoder.process_video(file_obj)
-    assert result.status == ProcessStatus.FILE_NOT_FOUND
+    
+    with patch.object(transcoder, "get_video_info") as mock_get_info:
+        mock_get_info.return_value = VideoInfo(video_codec="h264", audio_codec=["mp3"], needs_transcoding=True)
+        result = transcoder.process_video(file_obj)
+        assert result.status == ProcessStatus.ERROR
+        assert result.error_message == "ffmpeg error"
