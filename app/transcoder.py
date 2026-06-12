@@ -1,18 +1,17 @@
-# transcoder.py
 import json
 import re
 import shutil
 import subprocess
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
-
-from app.config import BackupStrategy
+from app.config import BackupStrategy, SubtitleMode
 from app.logger import logger
+
 
 class ProcessStatus(Enum):
     SUCCESS = 1
@@ -25,6 +24,16 @@ class ProcessStatus(Enum):
 class ProcessResult:
     status: ProcessStatus
     error_message: Optional[str] = None
+    original_size: Optional[int] = None
+    output_size: Optional[int] = None
+
+
+@dataclass
+class StreamInfo:
+    index: int
+    codec_type: str
+    codec: str
+    tags: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -33,6 +42,7 @@ class VideoInfo:
     audio_codec: Optional[List[str]] = None
     duration: Optional[float] = None
     needs_transcoding: bool = False
+    streams: List[StreamInfo] = field(default_factory=list)
 
 
 class Transcoder(ABC):
@@ -44,6 +54,8 @@ class Transcoder(ABC):
         """Initialize the Transcoder base class."""
         self.name = "base_empty"
         self.temp_file_list = []
+        self.subtitle_mode = SubtitleMode.COPY
+        self.verify_output_size = True
         pass
 
     @abstractmethod
@@ -87,9 +99,9 @@ class Transcoder(ABC):
         pass
 
     @abstractmethod
-    def process_video(self,
-                      input_path: Path,
-                      output_path: Path = None) -> ProcessResult:
+    def process_video(
+        self, input_path: Path, output_path: Path = None
+    ) -> ProcessResult:
         """
         Transcodes or copies video streams based on the existing codecs.
 
@@ -163,247 +175,417 @@ class FfmpegTranscoder(Transcoder):
     FFmpeg-based transcoder implementation.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        subtitle_mode: SubtitleMode = SubtitleMode.COPY,
+        verify_output_size: bool = True,
+    ):
         """Initialize the FfmpegTranscoder class."""
         self.name = "ffmpeg"
-        self._best_hevc_encoder = "libx265"
-        super().__init__()
-        tool_list = self.list_tools()
-        logger.debug(f"Tools to be used: {tool_list}")
-        tool_availability = self.check_availability()
-        for tool in tool_list:
-            logger.debug(
-                f"Tool [{tool}] available={tool_availability[tool]['available']} && path={tool_availability[tool]['path']}"
-            )
-            if not tool_availability[tool]["available"]:
-                raise RuntimeError(
-                    f"[FfmpegTranscoder] Cannot initialize, transcoder listed tool {tool} is not available in system"
-                )
-        self._best_hevc_encoder = self._get_best_hevc_encoder()
-        logger.info(
-            f"[FfmpegTranscoder] Best HEVC encoder: {self._best_hevc_encoder}")
+        self.temp_file_list = []
+        self._best_hevc_encoder = None
+        self.subtitle_mode = subtitle_mode
+        self.verify_output_size = verify_output_size
+        self._detect_best_hevc_encoder()
 
-    def list_tools(self) -> list:
+    def list_tools(self) -> Optional[List[str]]:
         return ["ffmpeg", "ffprobe"]
 
-    def check_availability(self) -> dict:
+    def check_availability(self) -> Optional[Dict]:
         """
-        Checks if ffmpeg and ffprobe are installed and accessible in the system PATH.
-        Returns a dictionary with the status and paths.
+        Checks if ffmpeg and ffprobe are installed and accessible.
         """
-        tools = ["ffmpeg", "ffprobe"]
-        results = {}
+        tools = {"ffmpeg": {"available": False}, "ffprobe": {"available": False}}
 
         for tool in tools:
-            path = shutil.which(tool)
-            if path:
-                # Optionally verify by running --version to ensure it's not a dummy file
-                try:
-                    subprocess.run([tool, "-version"],
-                                   capture_output=True,
-                                   text=True,
-                                   check=True)
-                    results[tool] = {"available": True, "path": path}
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    results[tool] = {"available": False, "path": None}
-            else:
-                results[tool] = {"available": False, "path": None}
+            try:
+                result = subprocess.run(
+                    [tool, "-version"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                if result.returncode == 0:
+                    tools[tool]["available"] = True
+            except Exception:
+                tools[tool]["available"] = False
 
-        return results
+        return tools
 
     def get_video_info(self, input_path: Path) -> Optional[VideoInfo]:
         """
-        Uses ffprobe to extract video and audio codec information.
+        Extracts video, audio, and subtitle stream information using ffprobe.
 
-        Args:
-            input_path (Path): Path to the media file.
-
-        Returns:
-            VideoInfo: A dataclass containing 'video_codec', 'audio_codec', 'duration',
-                and 'needs_transcoding', or None if the file cannot be parsed.
+        Returns a VideoInfo object with:
+        - The primary video codec
+        - Combined audio codec list (for backward compatibility)
+        - Duration
+        - Whether transcoding is needed
+        - Full stream inventory (streams field)
         """
-        # ffprobe command to extract stream information in JSON format
         command = [
             "ffprobe",
             "-v",
-            "quiet",
-            "-print_format",
+            "error",
+            "-analyzeduration",
+            "0",
+            "-show_entries",
+            "stream=index,codec_type,codec_name:stream_tags=language,title",
+            "-of",
             "json",
-            "-show_streams",
-            "-show_format",
+            "-i",
             str(input_path),
         ]
 
         try:
-            # Execute the command and capture the output
-            result = subprocess.run(command,
-                                    capture_output=True,
-                                    text=True,
-                                    check=True)
-            data = json.loads(result.stdout)
-
-            video_codec = None
-            audio_codec = []
-            duration = float(data.get("format", {}).get("duration", 0))
-
-            for stream in data.get("streams", []):
-                codec_type = stream.get("codec_type")
-                codec_name = stream.get("codec_name")
-
-                if codec_type == "video" and not video_codec:
-                    video_codec = codec_name
-                elif codec_type == "audio":
-                    audio_codec.append(codec_name)
-
-            needs_transcoding = True
-            # Logic check: If already HEVC (h265) and AAC, we might want to skip it
-            if video_codec == "hevc" and "aac" in audio_codec:
-                needs_transcoding = False
-
-            return VideoInfo(video_codec, audio_codec, duration,
-                             needs_transcoding)
-        except Exception:
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to probe {input_path.name}: {e.stderr}")
+            return None
+        except FileNotFoundError:
+            logger.error(f"File not found: {input_path}")
             return None
 
-    def _is_encoder_functional(self, encoder_name):
-        """Checks if a specific FFmpeg encoder can actually run."""
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=640x480",  # Tiny fake input
-            "-t",
-            "0.5",  # Only 0.5 seconds
-            "-c:v",
-            encoder_name,
-            "-f",
-            "null",
-            "-",  # Output to nowhere
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse ffprobe output for {input_path.name}")
+            return None
+
+        streams = data.get("streams", [])
+        if not streams:
+            logger.warning(f"No streams found in {input_path.name}")
+            return None
+
+        # Parse all streams into StreamInfo objects
+        all_streams: List[StreamInfo] = []
+        video_codec = None
+        audio_codecs: List[str] = []
+        subtitle_streams: List[StreamInfo] = []
+        duration = None
+
+        for s in streams:
+            idx = s.get("index", 0)
+            codec_type = s.get("codec_type", "unknown")
+            codec_name = s.get("codec_name", "unknown")
+            tags = {}
+            if "tags" in s:
+                tags = {k.lower(): v for k, v in s["tags"].items()}
+
+            stream_info = StreamInfo(
+                index=idx,
+                codec_type=codec_type,
+                codec=codec_name,
+                tags=tags,
+            )
+            all_streams.append(stream_info)
+
+            if codec_type == "video" and video_codec is None:
+                video_codec = codec_name
+            elif codec_type == "audio":
+                audio_codecs.append(codec_name)
+            elif codec_type == "subtitle":
+                subtitle_streams.append(stream_info)
+
+        # Get duration from format
+        fmt = data.get("format", {})
+        if "duration" in fmt:
+            try:
+                duration = float(fmt["duration"])
+            except (ValueError, TypeError):
+                pass
+
+        # Determine if transcoding is needed
+        needs_transcoding = False
+        if video_codec and video_codec.lower() != "hevc":
+            needs_transcoding = True
+        if audio_codecs:
+            for ac in audio_codecs:
+                if ac.lower() != "aac":
+                    needs_transcoding = True
+
+        info = VideoInfo(
+            video_codec=video_codec,
+            audio_codec=audio_codecs if audio_codecs else None,
+            duration=duration,
+            needs_transcoding=needs_transcoding,
+            streams=all_streams,
+        )
+
+        logger.info(
+            f"[~] {input_path.name}: video={video_codec}, "
+            f"audio={audio_codecs}, "
+            f"subtitles={len(subtitle_streams)}, "
+            f"needs_transcoding={needs_transcoding}"
+        )
+
+        return info
+
+    def _detect_best_hevc_encoder(self):
+        """
+        Detects and selects the best available HEVC encoder.
+
+        Priority order: VideoToolbox > NVENC > QSV > AMF > libx265
+        Falls back to libx265 if no hardware encoder is available or functional.
+        """
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                self._best_hevc_encoder = "libx265"
+                return
+            encoder_list = result.stdout
+        except Exception:
+            self._best_hevc_encoder = "libx265"
+            return
+
+        # Priority list for HEVC encoders
+        encoder_priority = [
+            "hevc_videotoolbox",
+            "hevc_nvenc",
+            "hevc_qsv",
+            "hevc_amf",
+            "libx265",
         ]
 
+        for enc in encoder_priority:
+            # Check if encoder name appears in the list
+            # Pattern: line starting with any char, then 5 dots, then encoder name
+            pattern = r"\.{5}\s+" + re.escape(enc) + r"\b"
+            if re.search(pattern, encoder_list, re.MULTILINE):
+                # For hardware encoders, verify they are functional
+                if enc == "libx265" or self._is_encoder_functional(enc):
+                    self._best_hevc_encoder = enc
+                    logger.info(f"[+] Selected encoder: {enc}")
+                    return
+
+        # Fallback
+        self._best_hevc_encoder = "libx265"
+
+    def _is_encoder_functional(self, encoder_name: str) -> bool:
+        """Quickly test if a hardware encoder is functional by encoding a tiny segment."""
         try:
-            # Run command, capturing output to keep logs clean
-            result = subprocess.run(cmd,
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=5)
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=2x2:d=0.1",
+                    "-c:v",
+                    encoder_name,
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
             return result.returncode == 0
         except Exception:
             return False
 
-    def _get_best_hevc_encoder(self) -> str:
+    def _build_stream_maps(self, info: VideoInfo) -> List[str]:
         """
-        Detects the best available HEVC encoder based on hardware availability.
-        Priority: VideoToolbox (Mac) > NVENC (NVIDIA) > QSV (Intel) > libx265 (CPU)
+        Build FFmpeg stream mapping arguments.
+
+        Uses -map 0 to copy all streams from the input, then applies
+        per-codec-type encoder overrides.
         """
-        try:
-            # Get list of all encoders supported by the installed FFmpeg
-            result = subprocess.run(["ffmpeg", "-encoders"],
-                                    capture_output=True,
-                                    text=True,
-                                    check=True)
-            output = result.stdout
+        args = ["-map", "0"]
 
-            # Define priority list for HEVC hardware encoders
-            # hevc_videotoolbox: macOS (Apple Silicon / Intel Mac)
-            # hevc_nvenc: NVIDIA GPUs
-            # hevc_qsv: Intel Quick Sync
-            # hevc_amf: AMD GPUs
-            hardware_encoders = [
-                "hevc_videotoolbox",
-                "hevc_nvenc",
-                "hevc_qsv",
-                "hevc_amf",
-            ]
+        # Video encoder
+        args += ["-c:v", self._best_hevc_encoder, "-crf", "23", "-preset", "medium"]
 
-            for encoder in hardware_encoders:
-                # Look for the encoder name in the output (ensuring it's a video encoder 'V')
-                if re.search(rf"V.....\s+{encoder}", output):
-                    if self._is_encoder_functional(encoder):
-                        return encoder
-                    else:
-                        continue
+        # Audio: per-stream handling — copy AAC, transcode others to AAC
+        audio_indices = [s for s in info.streams if s.codec_type == "audio"]
+        if audio_indices:
+            logger.info(
+                f"[~] Processing {len(audio_indices)} audio track(s): "
+                + ", ".join(
+                    f"#{s.index} ({s.codec})"
+                    + (
+                        f" [{s.tags.get('language', 'und')}]"
+                        if "language" in s.tags
+                        else ""
+                    )
+                    for s in audio_indices
+                )
+            )
+            stream_counter: Dict[str, int] = {}
+            for s in audio_indices:
+                codec_type = "a"  # short form for FFmpeg stream specifier
+                stream_counter.setdefault(codec_type, 0)
+                idx = stream_counter[codec_type]
+                stream_counter[codec_type] += 1
 
-            # Fallback to software (CPU) if no hardware encoder found
-            return "libx265"
+                if s.codec.lower() == "aac":
+                    logger.info(f"  Audio #{s.index} ({s.codec}): already AAC, copying")
+                    args += [f"-c:{codec_type}:{idx}", "copy"]
+                else:
+                    logger.info(f"  Audio #{s.index} ({s.codec}): transcoding to AAC")
+                    args += [f"-c:{codec_type}:{idx}", "aac", "-b:a", "128k"]
+        else:
+            # No audio stream — no audio flags needed
+            logger.info("[~] No audio streams found")
 
-        except subprocess.CalledProcessError:
-            return "Error: FFmpeg not found or failed to run."
+        # Subtitles: copy to mov_text if SUBTITLE_MODE is COPY or BOTH
+        subtitle_indices = [s for s in info.streams if s.codec_type == "subtitle"]
+        if subtitle_indices and self.subtitle_mode in (
+            SubtitleMode.COPY,
+            SubtitleMode.BOTH,
+        ):
+            logger.info(
+                f"[~] Preserving {len(subtitle_indices)} subtitle track(s): "
+                + ", ".join(
+                    f"#{s.index} ({s.codec})"
+                    + (
+                        f" [{s.tags.get('language', 'und')}]"
+                        if "language" in s.tags
+                        else ""
+                    )
+                    for s in subtitle_indices
+                )
+            )
+            # Use mov_text for MP4 compatibility; copy bitmap subs as-is
+            args += ["-c:s", "mov_text"]
+        else:
+            if subtitle_indices:
+                logger.info(
+                    f"[~] Subtitle tracks found but SUBTITLE_MODE={self.subtitle_mode.value}, "
+                    f"not embedding in output"
+                )
+            # Explicitly disable subtitle copying when not preserving
+            args += ["-c:s", "copy"]
 
-    def process_video(self, input_path: Path, output_path: Path = None) -> ProcessResult:
+        return args
+
+    def process_video(
+        self, input_path: Path, output_path: Path = None
+    ) -> ProcessResult:
         """
-        Intelligently transcodes or copies streams based on existing codecs.
+        Transcodes or copies video streams based on the existing codecs.
+
+        Uses explicit stream mapping (-map 0) to preserve all streams.
+        Handles subtitle preservation and audio per-stream transcoding.
+        Optionally verifies output is smaller than input before replacing.
         """
-        # 1. Get metadata first (using the function we wrote earlier)
+        if not input_path.exists():
+            return ProcessResult(
+                ProcessStatus.FILE_NOT_FOUND, "Input file does not exist"
+            )
+
         info = self.get_video_info(input_path)
-        if not info:
-            return ProcessResult(ProcessStatus.FILE_NOT_FOUND, "Could not extract video info")
-        if info.needs_transcoding is False:
+        if info is None:
+            return ProcessResult(
+                ProcessStatus.FILE_NOT_FOUND, "Could not extract video info"
+            )
+
+        # Check if transcoding is needed
+        if not info.needs_transcoding:
+            logger.info(f"[~] {input_path.name}: Already in target format, skipping")
             return ProcessResult(ProcessStatus.SKIPPED)
 
-        # 2. Determine paths
-        temp_output = input_path.with_suffix(".transcoding.mp4")
-
-        # 3. Build Intelligent Command
-        # Start with base command
-        command = ["ffmpeg", "-y", "-i", str(input_path)]
-
-        # VIDEO LOGIC: Skip transcoding if already HEVC (h265)
-        if info.video_codec == "hevc":
-            logger.info(f"[~] {input_path.name}: Video is already H.265. Copying stream...")
-            command += ["-c:v", "copy"]
+        # If output_path is not given, create a temp file alongside the input
+        if output_path is None:
+            temp_output = input_path.with_name(input_path.stem + ".transcoding.mp4")
         else:
-            logger.info(
-                f"[*] {input_path.name}: Transcoding video to H.265 using {self._best_hevc_encoder}..."
-            )
-            command += [
-                "-c:v",
-                self._best_hevc_encoder,
-                "-crf",
-                "23",
-                "-preset",
-                "medium",
-            ]
+            temp_output = Path(output_path)
 
-        # AUDIO LOGIC: Skip transcoding if already AAC (or no audio stream present)
-        if info.audio_codec and "aac" in info.audio_codec:
-            logger.info(f"[~] {input_path.name}: Audio is already AAC. Copying stream...")
-            command += ["-c:a", "copy"]
-        else:
-            logger.info(f"[*] {input_path.name}: Transcoding audio to AAC...")
-            command += ["-c:a", "aac", "-b:a", "128k"]
+        # Capture original size for verification
+        original_size = input_path.stat().st_size
 
-        # Add compatibility tag and output path
+        # Build the FFmpeg command with explicit stream mapping
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_path),
+        ]
+
+        # Add stream mapping and encoders
+        command += self._build_stream_maps(info)
+
+        # Add compatibility flags
         command += ["-movflags", "+faststart"]
         command += ["-tag:v", "hvc1", str(temp_output)]
 
-        # 4. Execute
+        # Execute
+        logger.info(
+            f"[*] Transcoding {input_path.name} with encoder {self._best_hevc_encoder}..."
+        )
+        if info.audio_codec:
+            logger.info(f"[*] Audio streams: {info.audio_codec}")
+        subtitle_count = len([s for s in info.streams if s.codec_type == "subtitle"])
+        if subtitle_count:
+            logger.info(f"[*] Subtitle streams: {subtitle_count}")
+
         try:
+            start_time = time.perf_counter()
             result = subprocess.run(command, capture_output=True, text=True)
+            elapsed = time.perf_counter() - start_time
+
             if result.returncode != 0:
-                logger.error(f"[-] FFmpeg Failed for {input_path.name}: {result.stderr}")
+                logger.error(
+                    f"[-] FFmpeg Failed for {input_path.name}: {result.stderr}"
+                )
                 if temp_output.exists():
                     temp_output.unlink()
-                return ProcessResult(ProcessStatus.ERROR, result.stderr)
+                return ProcessResult(
+                    ProcessStatus.ERROR, result.stderr, original_size=original_size
+                )
 
-            # 5. Swap files (Replace original)
+            output_size = temp_output.stat().st_size
+
+            logger.info(
+                f"[~] Transcoding complete in {elapsed:.1f}s: "
+                f"{original_size / 1024 / 1024:.1f}MB -> {output_size / 1024 / 1024:.1f}MB "
+                f"({(1 - output_size / original_size) * 100:.1f}% reduction)"
+            )
+
+            # Verify output size
+            if self.verify_output_size and output_size > original_size:
+                logger.warning(
+                    f"[-] Output is larger than original "
+                    f"({output_size} vs {original_size} bytes). "
+                    f"Keeping original file and discarding transcoded output."
+                )
+                temp_output.unlink()
+                return ProcessResult(
+                    ProcessStatus.SKIPPED,
+                    f"Output larger than original: {output_size} > {original_size}",
+                    original_size=original_size,
+                    output_size=output_size,
+                )
+
+            # Swap files (Replace original)
             if output_path is None:
-                backup_path = input_path.with_suffix(input_path.suffix +
-                                                     ".originalmedia")
+                backup_path = input_path.with_suffix(
+                    input_path.suffix + ".originalmedia"
+                )
                 input_path.rename(backup_path)
                 temp_output.rename(input_path)
                 logger.info(f"[Done] Processed: {input_path.name}")
                 self.temp_file_list.append(Path(backup_path))
-            
-            return ProcessResult(ProcessStatus.SUCCESS)
+
+            return ProcessResult(
+                ProcessStatus.SUCCESS,
+                original_size=original_size,
+                output_size=output_size,
+            )
 
         except Exception as e:
             logger.error(f"[-] Unexpected error for {input_path.name}: {str(e)}")
             if temp_output.exists():
                 temp_output.unlink()
-            return ProcessResult(ProcessStatus.ERROR, str(e))
+            return ProcessResult(
+                ProcessStatus.ERROR, str(e), original_size=original_size
+            )
 
     def extract_subtitles(self, input_path: Path, output_dir: Path):
         """
@@ -432,10 +614,9 @@ class FfmpegTranscoder(Transcoder):
 
         try:
             start_time = time.perf_counter()
-            result = subprocess.run(probe_command,
-                                    capture_output=True,
-                                    text=True,
-                                    check=True)
+            result = subprocess.run(
+                probe_command, capture_output=True, text=True, check=True
+            )
             end_time = time.perf_counter()
             streams = json.loads(result.stdout).get("streams", [])
 
@@ -444,7 +625,7 @@ class FfmpegTranscoder(Transcoder):
                 return
             else:
                 logger.info(
-                    f"Found {len(streams)} subtitle streams in {input_path.name} in {end_time-start_time:.2f}s"
+                    f"Found {len(streams)} subtitle streams in {input_path.name} in {end_time - start_time:.2f}s"
                 )
 
             # 2. Extract each subtitle stream
@@ -476,11 +657,13 @@ class FfmpegTranscoder(Transcoder):
                     str(srt_path),  # Output path
                 ]
 
-                subprocess.run(extract_command,
-                               capture_output=True,
-                               check=True)
+                subprocess.run(extract_command, capture_output=True, check=True)
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Error extracting subtitles from {input_path.name}: {e.stderr}")
+            logger.error(
+                f"Error extracting subtitles from {input_path.name}: {e.stderr}"
+            )
         except Exception as e:
-            logger.error(f"An unexpected error occurred during subtitle extraction for {input_path.name}: {e}")
+            logger.error(
+                f"An unexpected error occurred during subtitle extraction for {input_path.name}: {e}"
+            )

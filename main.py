@@ -15,8 +15,14 @@ from app.transcoder import FfmpegTranscoder
 def _build_pipeline(config: AppConfig) -> Pipeline:
     """Build and return a fully-configured Pipeline instance."""
     scanner = MediaScanner()
-    transcoder = FfmpegTranscoder()
-    jobrepo = SQLiteJobRepository(config.job_repo_file)
+    transcoder = FfmpegTranscoder(
+        subtitle_mode=config.subtitle_mode,
+        verify_output_size=config.verify_output_size,
+    )
+    jobrepo = SQLiteJobRepository(
+        config.job_repo_file,
+        retry_timeout=config.transcode_retry_timeout,
+    )
 
     return Pipeline(
         scanner=scanner,
@@ -26,6 +32,8 @@ def _build_pipeline(config: AppConfig) -> Pipeline:
         backup_strategy=config.backup_strategy,
         backup_dir=str(config.backup_dir),
         extract_subtitle=config.extract_subtitle,
+        subtitle_mode=config.subtitle_mode,
+        verify_output_size=config.verify_output_size,
     )
 
 
@@ -77,6 +85,9 @@ def main():
         sys.exit(1)
 
     try:
+        # Clean orphaned temp files from previous runs
+        pipeline._clean_orphan_temp_files()
+
         if args.path:
             file_path = Path(args.path).resolve()
             if not file_path.exists():

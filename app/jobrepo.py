@@ -135,11 +135,24 @@ class JobRepository(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_stale_processing_jobs(self, timeout_seconds: int) -> list[Job]:
+        """
+        Get jobs stuck in 'processing' state longer than the given timeout.
+
+        Args:
+            timeout_seconds (int): Number of seconds after which a processing job is considered stale.
+
+        Returns:
+            list[Job]: Stale processing jobs.
+        """
+        pass
+
 
 class SQLiteJobRepository(JobRepository):
-
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, retry_timeout: int = 600):
         self.db_path = db_path
+        self.retry_timeout = retry_timeout
         self._init_db()
 
     def _init_db(self):
@@ -175,7 +188,7 @@ class SQLiteJobRepository(JobRepository):
     def enqueue(self, path: Path) -> EnqueueResult:
         path = path.resolve()
         path_str = str(path)
-        
+
         stat = path.stat()
         current_size = stat.st_size
         current_mtime = stat.st_mtime
@@ -200,9 +213,8 @@ class SQLiteJobRepository(JobRepository):
 
             status, saved_size, saved_mtime = row["status"], row["size"], row["mtime"]
 
-            # Case 2: File has changed (size or mtime)
-            if current_size != saved_size or current_mtime != saved_mtime:
-                logger.info(f"File changed: {path_str}. Re-enqueuing.")
+            # Case 2: file changed (size or mtime differ) -> re-enqueue
+            if saved_size != current_size or saved_mtime != current_mtime:
                 conn.execute(
                     """
                     UPDATE jobs
@@ -217,7 +229,7 @@ class SQLiteJobRepository(JobRepository):
                 )
                 return EnqueueResult.NEW
 
-            # Case 3: retry job failed (though I used 'error' in current impl, let's keep consistency)
+            # Case 3: retry job failed
             if status == "error" or status == "failed":
                 conn.execute(
                     """
@@ -249,6 +261,26 @@ class SQLiteJobRepository(JobRepository):
 
     def get_next(self) -> Optional[Job]:
         with self._conn() as conn:
+            # First, try to reclaim stale processing jobs
+            stale_jobs = self._find_stale_processing_jobs(conn)
+            if stale_jobs:
+                for j in stale_jobs:
+                    logger.info(
+                        f"[Resume] Reclaiming job #{j['id']} ({Path(j['path']).name}) "
+                        f"stuck in 'processing' state"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'pending',
+                            error = 'resumed after timeout',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (j["id"],),
+                    )
+
+            # Now get the next pending job
             row = conn.execute(
                 """
                 SELECT id, path
@@ -273,6 +305,38 @@ class SQLiteJobRepository(JobRepository):
             )
 
             return Job(id=row["id"], path=Path(row["path"]))
+
+    def _find_stale_processing_jobs(self, conn) -> list:
+        """
+        Find jobs stuck in 'processing' state beyond the retry timeout.
+        Uses SQLite's datetime functions for comparison.
+        """
+        timeout_seconds = self.retry_timeout
+        rows = conn.execute(
+            """
+            SELECT id, path
+            FROM jobs
+            WHERE status = 'processing'
+              AND (julianday('now') - julianday(updated_at)) * 86400 > ?
+            ORDER BY id
+            """,
+            (timeout_seconds,),
+        ).fetchall()
+        return rows
+
+    def get_stale_processing_jobs(self, timeout_seconds: int) -> list[Job]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, path
+                FROM jobs
+                WHERE status = 'processing'
+                  AND (julianday('now') - julianday(updated_at)) * 86400 > ?
+                ORDER BY id
+                """,
+                (timeout_seconds,),
+            ).fetchall()
+            return [Job(id=r["id"], path=Path(r["path"])) for r in rows]
 
     def get_next_trash(self) -> Optional[Job]:
         with self._conn() as conn:
