@@ -367,8 +367,8 @@ class FfmpegTranscoder(Transcoder):
                 "medium",
             ]
 
-        # AUDIO LOGIC: Skip transcoding if already AAC
-        if "aac" in info.audio_codec:
+        # AUDIO LOGIC: Skip transcoding if already AAC (or no audio stream present)
+        if info.audio_codec and "aac" in info.audio_codec:
             logger.info(f"[~] {input_path.name}: Audio is already AAC. Copying stream...")
             command += ["-c:a", "copy"]
         else:

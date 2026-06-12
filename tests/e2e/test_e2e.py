@@ -29,7 +29,7 @@ def test_pipeline_e2e_backup_strategy_delete():
         "tests/test_assets/videos_temp/test_need_transcode.mkv"
     )
     expected_temp_file = Path(
-        "tests/test_assets/videos_temp/test_need_transcode.mkv.orginalmedia"
+        "tests/test_assets/videos_temp/test_need_transcode.mkv.originalmedia"
     )
     assert expected_transcoded_file.exists() is True
     new_state = transcoder.get_video_info(expected_transcoded_file)
@@ -64,7 +64,7 @@ def test_pipeline_e2e_backup_strategy_archive():
         "tests/test_assets/videos_temp/test_need_transcode.mkv"
     )
     expected_temp_file = Path(
-        "tests/test_assets/videos_temp/test_need_transcode.mkv.orginalmedia"
+        "tests/test_assets/videos_temp/test_need_transcode.mkv.originalmedia"
     )
     expected_archived_dir = Path(ARCHIVE_DIRS)
     assert expected_transcoded_file.exists() is True

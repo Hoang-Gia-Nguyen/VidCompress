@@ -11,3 +11,18 @@ media_job.db
 GEMINI.md
 CLAUDE.md
 AGENTS.md
+
+# Codex‑related tooling
+.codex/
+.agents/
+
+# Test output
+report-*.html
+results-*.xml
+.coverage
+
+# Job databases
+*.db
+
+# Trigger files
+trigger_*

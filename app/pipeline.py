@@ -55,6 +55,7 @@ class Pipeline:
         self.backup_strategy = backup_strategy
         self.backup_dir = backup_dir
         self.extract_subtitle = extract_subtitle
+        self.dry_run = dry_run
 
     def scan(self):
         """

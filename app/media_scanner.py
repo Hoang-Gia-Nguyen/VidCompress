@@ -63,7 +63,7 @@ class MediaScanner:
             logger.error(
                 f"The directory '{root_dir}' does not exist or is not a directory."
             )
-            return []
+            return
 
         if extensions is None:
             extensions = self.extension_list
