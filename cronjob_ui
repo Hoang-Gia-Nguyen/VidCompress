@@ -1,0 +1,2 @@
+# Dummy cron file for the UI container (keeps cron daemon available)
+* * * * * root true

@@ -1,21 +1,28 @@
-.DS_Store
-
-# Coverage files
+.pytest_cache
+venv
+**/__pycache__
+**/.env
+config.json
+.vscode/
 .coverage
-coverage.xml
-junit.xml
-
-# Python cache files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# gemini file
+.coveragerc
+htmlcov
+media_job.db
 GEMINI.md
+CLAUDE.md
+AGENTS.md
 
-# Test output directory
-test_output/
-testoutput/
-allure-results/
-TEST_STRATEGY.mdtest_folder/
-test_input/
+# Codex‑related tooling
+.codex/
+.agents/
+
+# Test output
+report-*.html
+results-*.xml
+.coverage
+
+# Job databases
+*.db
+
+# Trigger files
+trigger_*

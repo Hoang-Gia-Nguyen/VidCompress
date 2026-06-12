@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  transcode-ui:
+    build: .
+    container_name: transcode_ui
+    environment:
+      - FLASK_PORT=5577
+      - TZ=UTC
+    ports:
+      - "5577:5577"
+    volumes:
+      - ./:/app:rw
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

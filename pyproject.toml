@@ -1,0 +1,30 @@
+[project]
+name = "transcode-app"
+version = "0.1.0"
+dependencies = [
+    "pydantic>=2.0.0",
+    "flask>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-html",
+    "pytest-cov",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+    "e2e: end-to-end tests",
+]
+
+[tool.ruff]
+fix = true
+
+[tool.coverage.run]
+source = ["app"]
