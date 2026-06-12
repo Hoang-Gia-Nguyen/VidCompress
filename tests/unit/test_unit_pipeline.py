@@ -71,7 +71,9 @@ def test_run_transcode_success_updates_repo(pipeline, mock_jobrepo, mock_transco
     mock_jobrepo.iter_pending.return_value = [job]
 
     mock_transcoder.get_video_info.return_value = VideoInfo(needs_transcoding=True)
-    mock_transcoder.process_video.return_value = ProcessResult(status=ProcessStatus.SUCCESS)
+    mock_transcoder.process_video.return_value = ProcessResult(
+        status=ProcessStatus.SUCCESS
+    )
 
     pipeline.run()
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.config import BackupStrategy
+from app.config import BackupStrategy, SubtitleMode
 from app.jobrepo import Job, JobRepository
 from app.logger import logger
 from app.media_scanner import MediaScanner
@@ -33,6 +33,8 @@ class Pipeline:
         backup_strategy: BackupStrategy,
         backup_dir: str = "",
         dry_run: bool = False,
+        subtitle_mode: SubtitleMode = SubtitleMode.COPY,
+        verify_output_size: bool = True,
     ):
         """
         Initializes a Pipeline object.
@@ -44,9 +46,8 @@ class Pipeline:
             backup_strategy (BackupStrategy): The strategy used for managing backups.
             backup_dir (str, optional): The directory where backups are stored. Defaults to an empty string.
             dry_run (bool, optional): A flag indicating whether to perform a dry run. Defaults to False.
-
-        Raises:
-            None
+            subtitle_mode (SubtitleMode): How subtitles are handled (COPY, EXTERNAL, BOTH).
+            verify_output_size (bool): Whether to verify transcoded output is smaller than original.
         """
         self.jobrepo = jobrepo
         self.scanner = scanner
@@ -56,6 +57,37 @@ class Pipeline:
         self.backup_dir = backup_dir
         self.extract_subtitle = extract_subtitle
         self.dry_run = dry_run
+        self.subtitle_mode = subtitle_mode
+        self.verify_output_size = verify_output_size
+
+        # Apply config to transcoder
+        if hasattr(self.transcoder, "subtitle_mode"):
+            self.transcoder.subtitle_mode = subtitle_mode
+        if hasattr(self.transcoder, "verify_output_size"):
+            self.transcoder.verify_output_size = verify_output_size
+
+    def _clean_orphan_temp_files(self):
+        """
+        Scan media directories for orphaned .transcoding.mp4 files and clean them up.
+        These files are left behind if the process crashes mid-transcode.
+        """
+        logger.info("[Cleanup] Scanning for orphaned temporary files...")
+        orphan_count = 0
+        for dir_path in self.media_dirs:
+            media_dir = Path(dir_path)
+            if not media_dir.exists():
+                continue
+            for orphan in media_dir.rglob("*.transcoding.mp4"):
+                try:
+                    orphan.unlink()
+                    orphan_count += 1
+                    logger.info(f"[Cleanup] Deleted orphaned temp file: {orphan}")
+                except Exception as e:
+                    logger.error(f"[Cleanup] Failed to delete {orphan}: {e}")
+        if orphan_count:
+            logger.info(f"[Cleanup] Removed {orphan_count} orphaned temporary file(s)")
+        else:
+            logger.info("[Cleanup] No orphaned temporary files found")
 
     def scan(self):
         """
@@ -87,21 +119,25 @@ class Pipeline:
             logger.info(f"Processing task {job.id}: {job.path.name}")
             if self.extract_subtitle:
                 self.transcoder.extract_subtitles(job.path, Path(job.path.parent))
-            
+
             info = self.transcoder.get_video_info(job.path)
             if info is None:
-                logger.warning(f"No video information could be extracted for {job.path}")
+                logger.warning(
+                    f"No video information could be extracted for {job.path}"
+                )
                 self.jobrepo.mark_error(job.id, "No video info extracted")
                 continue
-                
+
             if info.needs_transcoding is False:
                 logger.info(f"Skipping {job.path.name}: Already in target format")
                 self.jobrepo.mark_skipped(job.id)
                 continue
-            
+
             logger.info(f"Transcoding {job.path.name}...")
             result = self.transcoder.process_video(job.path)
-            logger.info(f"Transcoding complete for {job.path.name} (Status: {result.status.name})")
+            logger.info(
+                f"Transcoding complete for {job.path.name} (Status: {result.status.name})"
+            )
             self._update_process_status_to_repo(result, job)
 
             # Add all temp file to be a job to be cleaned later

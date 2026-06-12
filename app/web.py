@@ -8,14 +8,16 @@ from pathlib import Path
 app = Flask(__name__)
 
 # SQLite DB lives in the shared volume (mounted at /app inside the container)
-DB_PATH = Path(os.getenv('JOB_REPO_DB', '/app/job_repo.db'))
+DB_PATH = Path(os.getenv("JOB_REPO_DB", "/app/job_repo.db"))
+
 
 def init_db():
     # Ensure the database and required tables exist
     if not DB_PATH.exists():
         import sqlite3
+
         conn = sqlite3.connect(str(DB_PATH))
-        conn.executescript('''
+        conn.executescript("""
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT UNIQUE,
@@ -27,10 +29,11 @@ def init_db():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
-        ''')
+        """)
         conn.close()
 
-if os.getenv('FLASK_ENV') != 'testing':
+
+if os.getenv("FLASK_ENV") != "testing":
     init_db()
 
 
@@ -61,32 +64,39 @@ HTML = """
 </form>
 """
 
+
 def _get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
 
-@app.route('/')
+
+@app.route("/")
 def index():
     with _get_db() as conn:
-        jobs = conn.execute('SELECT id, path, status, error FROM jobs ORDER BY id').fetchall()
+        jobs = conn.execute(
+            "SELECT id, path, status, error FROM jobs ORDER BY id"
+        ).fetchall()
     return render_template_string(HTML, jobs=jobs)
 
-@app.route('/trigger/all', methods=['POST'])
+
+@app.route("/trigger/all", methods=["POST"])
 def trigger_all():
     # Create the trigger file that the host watcher monitors
-    Path('/app/trigger_all').touch()
-    return redirect(url_for('index'))
+    Path("/app/trigger_all").touch()
+    return redirect(url_for("index"))
 
-@app.route('/trigger/one', methods=['POST'])
+
+@app.route("/trigger/one", methods=["POST"])
 def trigger_one():
     # Path submitted by user; encode slashes as underscores for a safe filename
-    raw_path = request.form['path'].strip()
-    safe_name = 'trigger_' + raw_path.replace('/', '_')
-    Path(f'/app/{safe_name}').touch()
-    return redirect(url_for('index'))
+    raw_path = request.form["path"].strip()
+    safe_name = "trigger_" + raw_path.replace("/", "_")
+    Path(f"/app/{safe_name}").touch()
+    return redirect(url_for("index"))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Port can be overridden by env var FLASK_PORT; defaults to 5577
-    port = int(os.getenv('FLASK_PORT', '5577'))
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.getenv("FLASK_PORT", "5577"))
+    app.run(host="0.0.0.0", port=port)

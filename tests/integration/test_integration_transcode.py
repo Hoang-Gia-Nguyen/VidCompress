@@ -4,6 +4,7 @@ from pathlib import Path
 from app.transcoder import FfmpegTranscoder, ProcessStatus
 import pytest
 
+
 @pytest.mark.parametrize(
     "path, needs_transcoding, video_codec, audio_codec",
     [
@@ -29,6 +30,7 @@ def test_get_video_info(path, needs_transcoding, video_codec, audio_codec):
     assert info.video_codec == video_codec
     assert info.audio_codec == audio_codec
 
+
 @pytest.mark.parametrize(
     "file_path",
     [
@@ -45,6 +47,7 @@ def test_extract_subtitles(file_path):
     # breakpoint()
     srt_files = list(folder_obj.glob("*.srt"))
     assert len(srt_files) > 0, f"No .srt file found in {folder_path}"
+
 
 @pytest.mark.parametrize(
     "file_path, needs_transcoding",
@@ -67,5 +70,6 @@ def test_process_video(file_path, needs_transcoding):
         assert original_file_obj.exists()
     else:
         assert result.status == ProcessStatus.SKIPPED
+
 
 # TODO: Write a test case use mock to simulate ffmpeg fail, return ProcessStatus.ERROR

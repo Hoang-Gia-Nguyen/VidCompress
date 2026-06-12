@@ -3,6 +3,7 @@ from typing import Iterator, List, Optional
 
 from app.logger import logger
 
+
 class MediaScanner:
     """
     A class to scan directories for media files and manage backup files.
